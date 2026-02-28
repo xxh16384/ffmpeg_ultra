@@ -9,193 +9,31 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QPixmap, QCloseEvent
 from PySide6.QtCore import Qt
 
+from core.utils import get_ext_path
+from core.worker import FFmpegWorker
+from ui.ui_main_window import Ui_MainWindow
 
-def get_ext_path(executable_name):
-    """
-    终极寻路雷达：判断当前是开发环境还是单文件 exe 环境
-    """
-    if hasattr(sys, '_MEIPASS'):
-        # 如果是被打包成了单文件 exe，去系统偷偷解压的临时目录里找
-        return os.path.join(sys._MEIPASS, executable_name)
-    else:
-        # 如果是你在 VSCode/PyCharm 里直接运行，就在当前脚本所在目录找
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), executable_name)
-
-
-class FFmpegWorker(QThread):
-    log_signal = Signal(str)
-    finished_signal = Signal()
-
-    def __init__(self, input_file, output_file, enable_preview, preview_path, encode_args): # === 新增 encode_args ===
-        super().__init__()
-        self.input_file = input_file
-        self.output_file = output_file
-        self.enable_preview = enable_preview  
-        self.preview_path = preview_path      
-        self.encode_args = encode_args # === 保存传进来的动态参数 ===
-        self.process = None 
-        self.is_cancelled = False 
-
-    def run(self):
-        cmd = [get_ext_path("ffmpeg.exe"), "-y", "-i", self.input_file]
-        cmd.extend(self.encode_args)
-        cmd.append(self.output_file)
-
-        if self.enable_preview:
-            cmd.extend(["-vf", "fps=1", "-update", "1", self.preview_path])
-
-        # === 新增：终极防沉默崩溃安全网 ===
-        try:
-            CREATE_NO_WINDOW = 0x08000000
-            self.process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-                text=True, encoding='utf-8', errors='ignore', creationflags=CREATE_NO_WINDOW
-            )
-
-            for line in self.process.stdout:
-                self.log_signal.emit(line.strip())
-
-            self.process.wait()
-            if self.process.returncode != 0 and not self.is_cancelled:
-                self.log_signal.emit("❌ FFmpeg 发生致命错误，请检查参数或视频格式！")
-                return
-            
-            self.finished_signal.emit()
-            
-        except Exception as e:
-            # 如果线程崩溃，强制调出底层追溯日志
-            import traceback
-            error_msg = traceback.format_exc()
-            print(f"\n【💥后台致命崩溃报告】:\n{error_msg}\n")
-            
-            # 把遗言发给前台状态栏，防止界面卡死
-            self.log_signal.emit(f"线程启动崩溃，详见控制台！错误: {e}")
-            self.is_cancelled = True
-            self.finished_signal.emit()
-
-    def stop(self):
-        """强制结束进程"""
-        self.is_cancelled = True # === 新增：在强杀前，先打上取消标记 ===
-        if self.process:
-            try:
-                p = psutil.Process(self.process.pid)
-                for child in p.children(recursive=True):
-                    child.kill()
-                p.kill()
-            except Exception:
-                pass # 防止刚好进程自己结束时的底层报错
-
-    def pause(self):
-        """挂起进程 (路线 A)"""
-        if self.process:
-            psutil.Process(self.process.pid).suspend()
-
-    def resume(self):
-        """恢复进程 (路线 A)"""
-        if self.process:
-            psutil.Process(self.process.pid).resume()
-
-class FFmpegGUI(QMainWindow):
+class FFmpegGUI(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
-        # 窗口基础设置
-        self.setWindowTitle("xxh视频压制工具 v1.0")
-        self.resize(850, 500) # 初始窗口大小
-        # === 新增：在绘制界面前，先进行硬件自检 ===
+        # ==========================================
+        # 1. 魔法启动：一行代码加载所有生成的界面元素
+        # ==========================================
+        self.setupUi(self)
+
+        # ==========================================
+        # 2. 保留原有的核心初始化逻辑：硬件自检与动态预设
+        # ==========================================
         self.available_v_encoders = self.probe_hardware_encoders()
-        # === 新增 2. 核心：根据自检结果，动态生成可用的标准化预设 ===
         self.load_dynamic_presets()
 
-        # 核心 Widget 和 布局 (左右分栏布局)
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget) 
-
-        # ==================== 左侧控制区 ====================
-        left_panel = QVBoxLayout()
-        
-        # 区域一：文件调度区
-        left_panel.addWidget(QLabel("<b>📁 区域一：文件调度</b>"))
-        self.btn_input = QPushButton("选择原视频")
-        self.txt_input = QLineEdit()
-        self.txt_input.setPlaceholderText("等待导入...")
-        
-        self.btn_output = QPushButton("设置导出路径")
-        
-        # === 新增：导出路径与格式下拉菜单的横向编队 ===
-        output_layout = QHBoxLayout()
-        self.txt_output = QLineEdit()
-        self.txt_output.setPlaceholderText("等待设置...")
-        
-        self.cb_format = QComboBox()
-        self.cb_format.addItems([".mp4", ".mkv", ".mov", ".flv", ".avi"])
-        self.cb_format.setFixedWidth(75) # 固定宽度，小巧精致
-        self.cb_format.setStyleSheet("font-weight: bold;") # 加粗显得更硬核
-        
-        # 把输入框和下拉菜单塞进同一行
-        output_layout.addWidget(self.txt_output)
-        output_layout.addWidget(self.cb_format)
-
-        left_panel.addWidget(self.btn_input)
-        left_panel.addWidget(self.txt_input)
-        left_panel.addWidget(self.btn_output)
-        left_panel.addLayout(output_layout) # 把组装好的横向布局放进左侧面板
-        left_panel.addSpacing(20) # 留白增加呼吸感
-
-        # === 区域二：压制策略 (全新重构的预设与折叠选项卡) ===
-        left_panel.addWidget(QLabel("<b>⚙️ 区域二：压制策略</b>"))
-        
-        # === 修改 3. 预设下拉菜单：直接读取动态生成的键值名 ===
-        self.combo_preset = QComboBox()
-        # 把字典里的所有预设名字提取出来变成列表
+        # 给 UI 中空白的下拉菜单动态塞入数据
+        self.cb_v_encoder.addItems(self.available_v_encoders)
         self.combo_preset.addItems(list(self.preset_configs.keys()))
-        left_panel.addWidget(self.combo_preset)
-        
-        # 绑定下拉菜单切换事件，用来控制下方折叠面板的显示/隐藏
-        self.combo_preset.currentTextChanged.connect(self.toggle_custom_tab)
 
-        # 2. 全局画面预览开关 (保留原有设定)
-        self.chk_preview = QCheckBox("开启实时画面预览")
-        left_panel.addWidget(self.chk_preview)
-
-        # 3. 高级自定义面板 (QTabWidget 选项卡流派)
-        self.tab_custom = QTabWidget()
-        self.tab_custom.setVisible(False) # 默认隐藏，保持界面清爽
-
-        # --- 视频设置 Tab ---
-        tab_video = QWidget()
-        layout_video = QFormLayout(tab_video) # 使用表单布局，让参数对齐更规整
-        self.cb_v_encoder = QComboBox();self.cb_v_encoder.addItems(self.available_v_encoders)
-        self.cb_v_fps = QComboBox(); self.cb_v_fps.addItems(["保持源", "24", "30", "60"])
-        self.cb_v_res = QComboBox(); self.cb_v_res.addItems(["保持源", "720p", "1080p","1440p","2160p"])
-        
-        # 1. 码率/质量控制模式
-        self.cb_v_rc = QComboBox()
-        self.cb_v_rc.addItems(["cqp", "vbr", "cbr"])
-        # 2. 修改：创建滑块布局（滑块 + 数值实时预览）
-        val_layout = QHBoxLayout()
-        self.sld_v_value = QSlider(Qt.Horizontal)
-        self.lbl_v_val_display = QLabel("32") # 初始显示 CQP 的默认值
-        self.lbl_v_val_display.setFixedWidth(60)
-        self.lbl_v_val_display.setStyleSheet("font-weight: bold; color: #225555;")
-        val_layout.addWidget(self.sld_v_value)
-        val_layout.addWidget(self.lbl_v_val_display)
-
-        # 3. 绑定事件：模式切换时改滑块范围，滑块拖动时改显示数字
-        self.cb_v_rc.currentTextChanged.connect(self.update_slider_range)
-        self.sld_v_value.valueChanged.connect(self.update_slider_label)
-        
-        # 4. 初始化：手动触发一次范围设定（默认 CQP）
-        self.update_slider_range("cqp")
-        
-        layout_video.addRow("编码器:", self.cb_v_encoder)
-        layout_video.addRow("帧率(FPS):", self.cb_v_fps)
-        layout_video.addRow("分辨率:", self.cb_v_res)
-        layout_video.addRow("码率控制:", self.cb_v_rc)
-        layout_video.addRow("参数数值:", val_layout)
-        self.tab_custom.addTab(tab_video, "视频设置")
-        
-        # 编码器科普说明书
+        # ==========================================
+        # 3. 逐字保留：原汁原味的科普说明书
+        # ==========================================
         encoder_tips = {
             # NVIDIA 阵营 (NVENC)
             "av1_nvenc": "【NVIDIA 40系+ 专享】目前最先进的硬件AV1编码器，极高压缩比，画质优秀。",
@@ -221,6 +59,7 @@ class FFmpegGUI(QMainWindow):
             "copy": "【流复制模式】不进行任何重新编码。仅更换封装容器，速度取决于磁盘，画质0损失。"
         }
         self.set_combo_tooltips(self.cb_v_encoder, encoder_tips)
+        
         preset_tips = {
             "会议录屏极致瘦身 (AV1, 30帧, CQP)": "采用最新的 AV1 编码，适合录制幻灯片，文件体积缩小 50% 以上。",
             "高画质收藏版 (HEVC/H.265, VBR)": "兼顾画质与兼容性，适合存储 1080p/4K 电影，支持硬件加速。",
@@ -228,6 +67,7 @@ class FFmpegGUI(QMainWindow):
             "⚙️ 自定义参数...": "进入极客模式，手动微调每一项硬核压制参数。"
         }
         self.set_combo_tooltips(self.combo_preset, preset_tips)
+        
         rc_tips = {
             "cqp": (
                 "<b>[ 质量恒定模式 ]</b><br>"
@@ -250,78 +90,24 @@ class FFmpegGUI(QMainWindow):
         }
         self.set_combo_tooltips(self.cb_v_rc, rc_tips)
 
-        # --- 音频设置 Tab ---
-        tab_audio = QWidget()
-        layout_audio = QFormLayout(tab_audio)
-        self.cb_a_encoder = QComboBox(); self.cb_a_encoder.addItems(["aac", "mp3", "copy", "an (剥离静音)"])
-        self.cb_a_bitrate = QComboBox(); self.cb_a_bitrate.addItems(["320k", "192k", "128k"])
-        self.cb_a_sample = QComboBox(); self.cb_a_sample.addItems(["保持源", "44100", "48000"])
+        # ==========================================
+        # 4. 逐字保留：原有的所有事件绑定逻辑
+        # ==========================================
+        # 预设联动与模式切换
+        self.combo_preset.currentTextChanged.connect(self.toggle_custom_tab)
+        self.cb_v_rc.currentTextChanged.connect(self.update_slider_range)
+        self.sld_v_value.valueChanged.connect(self.update_slider_label)
+        self.cb_format.currentTextChanged.connect(self.change_output_extension)
         
-        layout_audio.addRow("编码器:", self.cb_a_encoder)
-        layout_audio.addRow("码率:", self.cb_a_bitrate)
-        layout_audio.addRow("采样率:", self.cb_a_sample)
-        self.tab_custom.addTab(tab_audio, "音频设置")
-
-        left_panel.addWidget(self.tab_custom)
-        left_panel.addStretch() # 把底部的按钮顶下去
-        # ====================================================
-        
-        # 开始按钮 (加大加粗)
-        self.btn_start = QPushButton("🚀 开始压制")
-        self.btn_start.setMinimumHeight(45)
-        self.btn_start.setStyleSheet("font-weight: bold; font-size: 14px;")
-        left_panel.addWidget(self.btn_start)
-
-        # ==================== 右侧监控区 ====================
-        right_panel = QVBoxLayout()
-
-        # 区域三：实时监控屏
-        right_panel.addWidget(QLabel("<b>📺 区域三：实时监控屏</b>"))
-        self.lbl_preview = QLabel("画面预览区\n(等待压制开始...)")
-        self.lbl_preview.setAlignment(Qt.AlignCenter)
-        # 用深色背景模拟监视器质感
-        self.lbl_preview.setStyleSheet("background-color: #1e1e1e; color: #888888; border-radius: 8px; font-size: 16px;")
-        self.lbl_preview.setMinimumSize(480, 270) # 维持 16:9 比例
-        right_panel.addWidget(self.lbl_preview)
-        right_panel.addSpacing(10)
-
-        # 区域四：进度与日志仪表盘
-        right_panel.addWidget(QLabel("<b>📊 区域四：运行状态</b>"))
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        right_panel.addWidget(self.progress_bar)
-        
-        self.lbl_status = QLabel("状态: 闲置 | 速度: -- | 剩余时间: --")
-        self.lbl_status.setStyleSheet("color: #666666;")
-        right_panel.addWidget(self.lbl_status)
-
-        # 将左右面板按比例加入主窗口 (左1 : 右2)
-        main_layout.addLayout(left_panel, 1) 
-        main_layout.addLayout(right_panel, 2) 
-        
-        # 按钮横向排版
-        btn_layout = QHBoxLayout()
-        self.btn_pause = QPushButton("⏸ 暂停")
-        self.btn_stop = QPushButton("⏹ 停止")
-        
-        self.btn_pause.setEnabled(False) # 初始不可用
-        self.btn_stop.setEnabled(False)  # 初始不可用
-        
-        btn_layout.addWidget(self.btn_pause)
-        btn_layout.addWidget(self.btn_stop)
-        left_panel.addLayout(btn_layout)
-
-        # 绑定点击事件
+        # 按钮绑定
         self.btn_pause.clicked.connect(self.toggle_pause)
         self.btn_stop.clicked.connect(self.stop_encoding)
-        
-        # 绑定按钮的点击事件
         self.btn_start.clicked.connect(self.start_encoding)
-        self.btn_input.clicked.connect(self.select_input_file)   # 新增：绑定导入按钮
-        self.btn_output.clicked.connect(self.select_output_file) # 新增：绑定导出按钮
-        # 绑定格式下拉菜单的切换事件
-        self.cb_format.currentTextChanged.connect(self.change_output_extension)
+        self.btn_input.clicked.connect(self.select_input_file)
+        self.btn_output.clicked.connect(self.select_output_file)
+        
+        # 初始化：手动触发一次范围设定（默认 CQP）
+        self.update_slider_range("cqp")
     
     def update_slider_range(self, mode):
         """根据选择的 RC 模式，动态调整滑块的最小值、最大值和当前值"""
@@ -455,7 +241,6 @@ class FFmpegGUI(QMainWindow):
         # 永远在列表最后保留“自定义”选项
         self.preset_configs["⚙️ 自定义参数..."] = []
         
-    
     def probe_video_info(self, file_path):
         import json # 局部引入，保持顶部代码整洁
         import subprocess
@@ -535,12 +320,19 @@ class FFmpegGUI(QMainWindow):
         v_enc = self.cb_v_encoder.currentText()
         is_nvenc = "nvenc" in v_enc
         is_amf = "amf" in v_enc
-
+        is_qsv = "qsv" in v_enc
+        
         # --- 视频编码部分 ---
         if v_enc == "copy":
             args.extend(["-c:v", "copy"])
         else:
             args.extend(["-c:v", v_enc])
+
+            # ✨ 核心修复 1：H264 硬件编码器的护城河
+            # 强制所有进入 H264 硬件的视频统一转换为标准的 8-bit yuv420p 格式并锁定 high 规格
+            # 这能解决 99% 的 h264_nvenc 和 h264_amf 突然暴毙的问题
+            if v_enc in ["h264_nvenc", "h264_amf"]:
+                args.extend(["-pix_fmt", "yuv420p", "-profile:v", "high"])
             
             # 帧率处理
             fps = self.cb_v_fps.currentText()
@@ -554,38 +346,46 @@ class FFmpegGUI(QMainWindow):
             elif res == "2160p": args.extend(["-vf", "scale=-1:2160"])
             elif res == "1440p": args.extend(["-vf", "scale=-1:1440"])
                 
-            # --- 码率控制适配 (接入滑块逻辑) ---
+            # --- 码率控制适配 (彻底扫清厂商方言壁垒) ---
             rc_mode = self.cb_v_rc.currentText()
-            # 从滑块直接获取整数值，避免了手动输入的格式错误
             val_int = self.sld_v_value.value() 
             
             if rc_mode == "cqp":
                 val = str(val_int)
                 if is_nvenc:
-                    # NVIDIA 专用：必须用 constqp 和 -qp，它不识别 AMD 的参数名
-                    args.extend(["-rc", "constqp", "-qp", val])
+                    # ✨ 核心修复 2：NVENC 真正的“恒定画质”最佳实践
+                    # 用 vbr 模式挂载 0 码率，配合 -cq 控制，彻底抛弃不稳定的 constqp
+                    args.extend(["-rc", "vbr", "-cq", val, "-b:v", "0"])
                 elif is_amf:
-                    # AMD 专用：使用 cqp 模式并同步设置 i/p 帧质量
                     args.extend(["-rc", "cqp", "-qp_i", val, "-qp_p", val])
+                elif is_qsv:
+                    args.extend(["-global_quality", val]) # Intel 的恒定质量方言
                 else:
-                    # 其它编码器 (如 CPU 软解) 的通用 CQP 参数
-                    args.extend(["-cqp", val])
+                    # 纯 CPU (libx264/x265/svtav1) 必须用 -crf
+                    args.extend(["-crf", val]) 
                     
             elif rc_mode == "vbr":
-                # 滑块数值在 VBR 模式下代表 kbps，自动补齐 'k' 单位
                 val = f"{val_int}k"
                 if is_nvenc:
-                    # NVIDIA 开启 VBR 时，建议同时限制 maxrate 以保证码率控制的严谨性
                     args.extend(["-rc", "vbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
+                elif is_amf:
+                    # AMD 的 VBR 方言叫 vbr_peak
+                    args.extend(["-rc", "vbr_peak", "-b:v", val])
                 else:
-                    args.extend(["-rc", "vbr", "-b:v", val])
+                    # CPU 和通用的 VBR 写法
+                    args.extend(["-b:v", val])
                     
             elif rc_mode == "cbr":
                 val = f"{val_int}k"
-                # CBR 模式通常在硬件编码器中支持较好
-                args.extend(["-rc", "cbr", "-b:v", val])
+                if is_nvenc:
+                    args.extend(["-rc", "cbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
+                elif is_amf:
+                    args.extend(["-rc", "cbr", "-b:v", val])
+                else:
+                    # CPU 强行 CBR 的标准做法是锁死 maxrate 和 bufsize
+                    args.extend(["-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
 
-        # --- 音频部分 (保留已确认的逻辑) ---
+        # --- 音频部分 (完全保留原有逻辑) ---
         a_enc = self.cb_a_encoder.currentText()
         if "剥离静音" in a_enc: 
             args.extend(["-an"])
@@ -671,6 +471,7 @@ class FFmpegGUI(QMainWindow):
             self.worker.stop()
 
     def print_log(self, text):
+        #print(text) #调试时直接往控制台输出
         # 1. 使用正则表达式狙击“当前时间”和“压制速度”
         # 匹配格式如 time=01:14:58.85
         time_match = re.search(r"time=(\d{2}:\d{2}:\d{2}\.\d{2})", text)

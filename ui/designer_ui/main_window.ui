@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>850</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>xxh视频压制工具 v1.0</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QHBoxLayout" name="main_layout" stretch="1,2">
+    <item>
+     <layout class="QVBoxLayout" name="left_panel">
+      <item>
+       <widget class="QLabel" name="label_1">
+        <property name="text"><string>&lt;b&gt;📁 区域一：文件调度&lt;/b&gt;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_input">
+        <property name="text"><string>选择原视频</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="txt_input">
+        <property name="placeholderText"><string>等待导入...</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_output">
+        <property name="text"><string>设置导出路径</string></property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="output_layout">
+        <item>
+         <widget class="QLineEdit" name="txt_output">
+          <property name="placeholderText"><string>等待设置...</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="cb_format">
+          <property name="minimumSize"><size><width>75</width><height>0</height></size></property>
+          <property name="styleSheet"><string>font-weight: bold;</string></property>
+          <item><property name="text"><string>.mp4</string></property></item>
+          <item><property name="text"><string>.mkv</string></property></item>
+          <item><property name="text"><string>.mov</string></property></item>
+          <item><property name="text"><string>.flv</string></property></item>
+          <item><property name="text"><string>.avi</string></property></item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <spacer name="verticalSpacer_1">
+        <property name="orientation"><enum>Qt::Vertical</enum></property>
+        <property name="sizeType"><enum>QSizePolicy::Fixed</enum></property>
+        <property name="sizeHint"><size><width>20</width><height>20</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_2">
+        <property name="text"><string>&lt;b&gt;⚙️ 区域二：压制策略&lt;/b&gt;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="combo_preset"/>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="chk_preview">
+        <property name="text"><string>开启实时画面预览</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTabWidget" name="tab_custom">
+        <property name="visible"><bool>false</bool></property>
+        <property name="currentIndex"><number>0</number></property>
+        <widget class="QWidget" name="tab_video">
+         <attribute name="title"><string>视频设置</string></attribute>
+         <layout class="QFormLayout" name="layout_video">
+          <item row="0" column="0"><widget class="QLabel" name="lbl_v1"><property name="text"><string>编码器:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QComboBox" name="cb_v_encoder"/></item>
+          <item row="1" column="0"><widget class="QLabel" name="lbl_v2"><property name="text"><string>帧率(FPS):</string></property></widget></item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="cb_v_fps">
+            <item><property name="text"><string>保持源</string></property></item>
+            <item><property name="text"><string>24</string></property></item>
+            <item><property name="text"><string>30</string></property></item>
+            <item><property name="text"><string>60</string></property></item>
+           </widget>
+          </item>
+          <item row="2" column="0"><widget class="QLabel" name="lbl_v3"><property name="text"><string>分辨率:</string></property></widget></item>
+          <item row="2" column="1">
+           <widget class="QComboBox" name="cb_v_res">
+            <item><property name="text"><string>保持源</string></property></item>
+            <item><property name="text"><string>720p</string></property></item>
+            <item><property name="text"><string>1080p</string></property></item>
+            <item><property name="text"><string>1440p</string></property></item>
+            <item><property name="text"><string>2160p</string></property></item>
+           </widget>
+          </item>
+          <item row="3" column="0"><widget class="QLabel" name="lbl_v4"><property name="text"><string>码率控制:</string></property></widget></item>
+          <item row="3" column="1">
+           <widget class="QComboBox" name="cb_v_rc">
+            <item><property name="text"><string>cqp</string></property></item>
+            <item><property name="text"><string>vbr</string></property></item>
+            <item><property name="text"><string>cbr</string></property></item>
+           </widget>
+          </item>
+          <item row="4" column="0"><widget class="QLabel" name="lbl_v5"><property name="text"><string>参数数值:</string></property></widget></item>
+          <item row="4" column="1">
+           <layout class="QHBoxLayout" name="val_layout">
+            <item>
+             <widget class="QSlider" name="sld_v_value">
+              <property name="orientation"><enum>Qt::Horizontal</enum></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="lbl_v_val_display">
+              <property name="minimumSize"><size><width>60</width><height>0</height></size></property>
+              <property name="styleSheet"><string>font-weight: bold; color: #225555;</string></property>
+              <property name="text"><string>32</string></property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+        <widget class="QWidget" name="tab_audio">
+         <attribute name="title"><string>音频设置</string></attribute>
+         <layout class="QFormLayout" name="layout_audio">
+          <item row="0" column="0"><widget class="QLabel" name="lbl_a1"><property name="text"><string>编码器:</string></property></widget></item>
+          <item row="0" column="1">
+           <widget class="QComboBox" name="cb_a_encoder">
+            <item><property name="text"><string>aac</string></property></item>
+            <item><property name="text"><string>mp3</string></property></item>
+            <item><property name="text"><string>copy</string></property></item>
+            <item><property name="text"><string>an (剥离静音)</string></property></item>
+           </widget>
+          </item>
+          <item row="1" column="0"><widget class="QLabel" name="lbl_a2"><property name="text"><string>码率:</string></property></widget></item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="cb_a_bitrate">
+            <item><property name="text"><string>320k</string></property></item>
+            <item><property name="text"><string>192k</string></property></item>
+            <item><property name="text"><string>128k</string></property></item>
+           </widget>
+          </item>
+          <item row="2" column="0"><widget class="QLabel" name="lbl_a3"><property name="text"><string>采样率:</string></property></widget></item>
+          <item row="2" column="1">
+           <widget class="QComboBox" name="cb_a_sample">
+            <item><property name="text"><string>保持源</string></property></item>
+            <item><property name="text"><string>44100</string></property></item>
+            <item><property name="text"><string>48000</string></property></item>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </widget>
+      </item>
+      <item>
+       <spacer name="verticalSpacer_2">
+        <property name="orientation"><enum>Qt::Vertical</enum></property>
+        <property name="sizeHint"><size><width>20</width><height>40</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_start">
+        <property name="minimumSize"><size><width>0</width><height>45</height></size></property>
+        <property name="styleSheet"><string>font-weight: bold; font-size: 14px;</string></property>
+        <property name="text"><string>🚀 开始压制</string></property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="btn_layout">
+        <item>
+         <widget class="QPushButton" name="btn_pause">
+          <property name="enabled"><bool>false</bool></property>
+          <property name="text"><string>⏸ 暂停</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_stop">
+          <property name="enabled"><bool>false</bool></property>
+          <property name="text"><string>⏹ 停止</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QVBoxLayout" name="right_panel">
+      <item>
+       <widget class="QLabel" name="label_3">
+        <property name="text"><string>&lt;b&gt;📺 区域三：实时监控屏&lt;/b&gt;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="lbl_preview">
+        <property name="minimumSize"><size><width>480</width><height>270</height></size></property>
+        <property name="styleSheet"><string>background-color: #1e1e1e; color: #888888; border-radius: 8px; font-size: 16px;</string></property>
+        <property name="text"><string>画面预览区
+(等待压制开始...)</string></property>
+        <property name="alignment"><set>Qt::AlignCenter</set></property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="verticalSpacer_3">
+        <property name="orientation"><enum>Qt::Vertical</enum></property>
+        <property name="sizeType"><enum>QSizePolicy::Fixed</enum></property>
+        <property name="sizeHint"><size><width>20</width><height>10</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_4">
+        <property name="text"><string>&lt;b&gt;📊 区域四：运行状态&lt;/b&gt;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QProgressBar" name="progress_bar">
+        <property name="value"><number>0</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="lbl_status">
+        <property name="styleSheet"><string>color: #666666;</string></property>
+        <property name="text"><string>状态: 闲置 | 速度: -- | 剩余时间: --</string></property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="verticalSpacer_4">
+        <property name="orientation"><enum>Qt::Vertical</enum></property>
+        <property name="sizeHint"><size><width>20</width><height>40</height></size></property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

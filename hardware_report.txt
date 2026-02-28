@@ -1,2 +1,2 @@
 可用编码器列表: ['av1_amf', 'hevc_amf', 'h264_amf', 'libx265', 'libx264']
-FFmpeg 路径: e:\python\ffmpeg_ultra\ffmpeg.exe
+FFmpeg 路径: e:\python\ffmpeg_ultra\tools\ffmpeg.exe
