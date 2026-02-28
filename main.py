@@ -1,11 +1,8 @@
 import sys,os,tempfile
-import subprocess,psutil
+import subprocess
 import re
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                               QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                               QCheckBox, QProgressBar, QFileDialog, QMessageBox,QComboBox,
-                               QTabWidget, QFormLayout, QProgressDialog,QSlider)
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageBox,QProgressDialog)
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QCloseEvent
 from PySide6.QtCore import Qt
 
@@ -30,65 +27,10 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         # 给 UI 中空白的下拉菜单动态塞入数据
         self.cb_v_encoder.addItems(self.available_v_encoders)
         self.combo_preset.addItems(list(self.preset_configs.keys()))
-
-        # ==========================================
-        # 3. 逐字保留：原汁原味的科普说明书
-        # ==========================================
-        encoder_tips = {
-            # NVIDIA 阵营 (NVENC)
-            "av1_nvenc": "【NVIDIA 40系+ 专享】目前最先进的硬件AV1编码器，极高压缩比，画质优秀。",
-            "hevc_nvenc": "【NVIDIA 硬件加速】H.265编码。平衡了画质与文件体积，适合压制高清收藏。 ",
-            "h264_nvenc": "【NVIDIA 硬件加速】H.264编码。兼容性之王，压制速度极快，适合快速出片。",
-            
-            # AMD 阵营 (AMF)
-            "av1_amf": "【AMD 7000系+ 专享】AMD 硬件AV1方案。适合新一代显卡用户追求高效压缩。",
-            "hevc_amf": "【AMD 硬件加速】HEVC编码。AMD核显或独显用户压制高码率视频的首选。",
-            "h264_amf": "【AMD 硬件加速】H.264编码。极致的编码速度，适合对兼容性要求高的普通视频。",
-            
-            # Intel 阵营 (QSV)
-            "av1_qsv": "【Intel Arc/新酷睿专享】Intel QSV 硬件AV1编码。效率极高，多媒体性能强劲。",
-            "hevc_qsv": "【Intel 硬件加速】HEVC编码。Intel核显用户压制高画质视频的低功耗方案。",
-            "h264_qsv": "【Intel 硬件加速】H.264编码。广泛应用于流媒体，性能稳定且兼容性好。",
-            
-            # CPU 软压阵营 (Software)
-            "libsvtav1": "【纯 CPU 软压】由 Intel/Netflix 开发。虽然压制极慢，但同体积下画质是目前的神话。",
-            "libx265": "【纯 CPU 软压】HEVC 标准压制。适合电影、纪录片深度压制，追求极致画质细节。",
-            "libx264": "【纯 CPU 软压】最稳、最慢、最清晰的H.264方案。不依赖显卡，不挑驱动。",
-            
-            # 特殊模式
-            "copy": "【流复制模式】不进行任何重新编码。仅更换封装容器，速度取决于磁盘，画质0损失。"
-        }
-        self.set_combo_tooltips(self.cb_v_encoder, encoder_tips)
+        self.toggle_custom_tab(self.combo_preset.currentText())
         
-        preset_tips = {
-            "会议录屏极致瘦身 (AV1, 30帧, CQP)": "采用最新的 AV1 编码，适合录制幻灯片，文件体积缩小 50% 以上。",
-            "高画质收藏版 (HEVC/H.265, VBR)": "兼顾画质与兼容性，适合存储 1080p/4K 电影，支持硬件加速。",
-            "老设备高兼容版 (H.264, CBR)": "最传统的格式，几乎能在任何破旧的播放器或电视上流畅运行。",
-            "⚙️ 自定义参数...": "进入极客模式，手动微调每一项硬核压制参数。"
-        }
-        self.set_combo_tooltips(self.combo_preset, preset_tips)
-        
-        rc_tips = {
-            "cqp": (
-                "<b>[ 质量恒定模式 ]</b><br>"
-                "固定每一帧的压缩倍率。不限制码率，只保证画面清晰度。<br>"
-                "<b>数值意义：</b>0 为无损（文件巨大），51 为极模糊。<br>"
-                "<b>建议范围：</b>18 - 28。数值越小，画质越好，体积越大。"
-            ),
-            "vbr": (
-                "<b>[ 动态码率模式 ]</b><br>"
-                "根据画面复杂度分配码率。复杂画面多给点，静止画面少给点。<br>"
-                "<b>数值意义：</b>设置的是‘目标平均码率’。<br>"
-                "<b>适用场景：</b>本地收藏、视频发布。是兼顾体积与画质的最佳平衡方案。"
-            ),
-            "cbr": (
-                "<b>[ 固定码率模式 ]</b><br>"
-                "全程保持恒定的传输速率，不顾画面复杂度，强行填充码率。<br>"
-                "<b>数值意义：</b>设置的是‘固定传输速率’。<br>"
-                "<b>适用场景：</b>直播推流、老式硬件播放。缺点是简单画面浪费空间，复杂画面可能模糊。"
-            )
-        }
-        self.set_combo_tooltips(self.cb_v_rc, rc_tips)
+        # === 从外部 YAML 统一加载并注入所有悬浮提示 ===
+        self.load_tooltips()
 
         # ==========================================
         # 4. 逐字保留：原有的所有事件绑定逻辑
@@ -108,30 +50,57 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         
         # 初始化：手动触发一次范围设定（默认 CQP）
         self.update_slider_range("cqp")
+        
     
     def update_slider_range(self, mode):
         """根据选择的 RC 模式，动态调整滑块的最小值、最大值和当前值"""
-        if mode == "cqp":
-            # CQP 范围：0 (无损) 到 51 (极差)，越小画质越好
-            self.sld_v_value.setRange(0, 51)
-            self.sld_v_value.setValue(32) # 给个主流默认值
-        else:
-            # CBR/VBR 范围：200k 到 30000k (单位：k)
-            # 我们让滑块的 1 个刻度代表 100k
-            self.sld_v_value.setRange(200, 30000)
-            self.sld_v_value.setSingleStep(100)
-            self.sld_v_value.setValue(5000) # 默认 5Mbps
+        # 暂时静音信号，防止在切范围时触发多余的 label 更新导致报错
+        self.sld_v_value.blockSignals(True)
         
+        if mode == "cqp":
+            # CQP 保持线性，0-51 越小画质越好
+            self.sld_v_value.setRange(0, 51)
+            self.sld_v_value.setSingleStep(1)
+            self.sld_v_value.setValue(32) 
+        else:
+            # CBR/VBR 模式：物理滑块变成 0-100 的进度条
+            self.sld_v_value.setRange(0, 100)
+            self.sld_v_value.setSingleStep(1)
+            # 默认给个 54 左右的位置，因为 54^3 映射出来刚好大概是 5000kbps 左右
+            self.sld_v_value.setValue(56) 
+            
+        self.sld_v_value.blockSignals(False)
         self.update_slider_label()
-
+    
+    def get_mapped_bitrate(self, slider_val):
+        """将 0-100 的滑块值进行非线性(三次幂)映射到 50-30000 kbps"""
+        min_kbps = 50
+        max_kbps = 30000
+        # 使用三次幂函数：滑块在前半段数字变化极慢，后半段变化极快
+        ratio = slider_val / 100.0
+        mapped_val = min_kbps + (max_kbps - min_kbps) * (ratio ** 3)
+        # 把计算结果规整一下，向下取整到最接近的 10，让 UI 看起来更整洁
+        return int(round(mapped_val / 10) * 10)
+    
+    def get_reverse_mapped_slider_val(self, target_kbps):
+        """将真实的码率 (如 5000 kbps) 逆向推导回 0-100 的滑块物理刻度"""
+        min_kbps = 50
+        max_kbps = 30000
+        if target_kbps <= min_kbps: return 0
+        if target_kbps >= max_kbps: return 100
+        # 逆向公式：开三次方根
+        ratio = ((target_kbps - min_kbps) / (max_kbps - min_kbps)) ** (1/3.0)
+        return int(round(ratio * 100))
+    
     def update_slider_label(self):
         """实时更新滑块旁边的文字显示"""
-        val = self.sld_v_value.value()
         mode = self.cb_v_rc.currentText()
         if mode == "cqp":
+            val = self.sld_v_value.value()
             self.lbl_v_val_display.setText(str(val))
         else:
-            # VBR/CBR 显示带单位的码率
+            # VBR/CBR 模式下，文字显示的是经过数学映射后的真实码率
+            val = self.get_mapped_bitrate(self.sld_v_value.value())
             if val >= 1000:
                 self.lbl_v_val_display.setText(f"{val/1000:.1f} Mbps")
             else:
@@ -187,7 +156,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                     print(f"✅ 探测成功: {enc}")
                 else:
                     # 即使失败，我们也要看一眼为什么失败 (特别是 N 卡)
-                    print(f"❌ {enc} 失败原因摘要: {result.stderr[-100:]}")
+                    #print(f"❌ {enc} 失败原因摘要: {result.stderr[-100:]}")
+                    pass
             except Exception as e:
                 print(f"⚠️ {enc} 探测超时或异常: {e}")
                 
@@ -200,47 +170,129 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         return available
     
     def load_dynamic_presets(self):
-        # 这个字典用来保存最终能够在界面上显示的可用预设，以及它们对应的最终参数
+        import yaml # 局部引入，保持顶部整洁
+        
         self.preset_configs = {}
+        raw_presets = []
 
-        # =====================================================================
-        # ⬇️ 以后自己加预设，只需要在这里按格式添加即可！ ⬇️
-        # requires: 只要探针探测到的真实编码器名字里包含这个词，该预设就会被激活
-        # {encoder}: 占位符，代码会自动把它替换成你电脑里真正能用的那个加速器
-        # =====================================================================
-        raw_presets = [
-            {
-                "name": "会议录屏极致瘦身 (AV1, 30帧, CQP)",
-                "requires": "av1",  
-                "args": ["-r", "30", "-c:v", "{encoder}", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32", "-c:a", "aac", "-b:a", "128k"]
-            },
-            {
-                "name": "高画质收藏版 (HEVC/H.265, VBR)",
-                "requires": "hevc", 
-                "args": ["-c:v", "{encoder}", "-rc", "vbr", "-b:v", "5000k", "-c:a", "aac", "-b:a", "320k"]
-            },
-            {
-                "name": "老设备高兼容版 (H.264, CBR)",
-                "requires": "264",  # 兼容 h264 或 264
-                "args": ["-c:v", "{encoder}", "-rc", "cbr", "-b:v", "2000k", "-c:a", "aac", "-b:a", "192k"]
-            }
-        ]
+        # 1. 动态定位 config/presets.yaml 的绝对路径
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        yaml_path = os.path.join(base_dir, "config", "presets.yaml")
 
-        # 核心匹配逻辑：让预设去寻找对应的真实硬件
+        # 2. 安全读取 YAML 文件
+        try:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+                raw_presets = data.get("presets", [])
+            print(f"📄 成功加载外部预设配置，共读取到 {len(raw_presets)} 个预设。")
+        except FileNotFoundError:
+            print(f"⚠️ 找不到配置文件: {yaml_path}，请检查 config 目录！")
+        except Exception as e:
+            print(f"💥 读取 presets.yaml 发生语法错误: {e}")
+
+        # ==========================================
+        # 3. 逐字保留：原汁原味的核心匹配与注入逻辑
+        # ==========================================
         for p in raw_presets:
-            # 在探针给出的清单中，寻找第一个包含 requires 关键词的编码器
-            # （因为探针里硬件加速排在前面，所以它会优先匹配到 amf/nvenc/qsv）
             matched_encoder = next((enc for enc in self.available_v_encoders if p["requires"] in enc), None)
             
             if matched_encoder:
-                # 如果找到了硬件，就把参数模板里的 {encoder} 替换成真实的硬件名字
-                final_args = [arg.replace("{encoder}", matched_encoder) for arg in p["args"]]
-                # 存入最终可用的字典中
-                self.preset_configs[p["name"]] = final_args
+                config = p["ui_state"].copy()
+                config["v_enc"] = matched_encoder # 动态塞入可用的硬件编码器
+                self.preset_configs[p["name"]] = config
 
         # 永远在列表最后保留“自定义”选项
-        self.preset_configs["⚙️ 自定义参数..."] = []
+        self.preset_configs["⚙️ 自定义参数..."] = {}
         
+    def load_tooltips(self):
+        import yaml
+        import os
+        
+        yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "tooltips.yaml")
+        try:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                tips = yaml.safe_load(f)
+            
+            # 从 YAML 字典中提取对应板块并注入 UI
+            if "encoder_tips" in tips:
+                self.set_combo_tooltips(self.cb_v_encoder, tips["encoder_tips"])
+            if "preset_tips" in tips:
+                self.set_combo_tooltips(self.combo_preset, tips["preset_tips"])
+            if "rc_tips" in tips:
+                self.set_combo_tooltips(self.cb_v_rc, tips["rc_tips"])
+                
+            print("💬 成功加载外部悬浮科普提示库。")
+        except FileNotFoundError:
+            print(f"⚠️ 找不到提示文案库: {yaml_path}")
+        except Exception as e:
+            print(f"💥 读取 tooltips.yaml 失败: {e}")
+
+    def toggle_custom_tab(self, text):
+        try:
+            #print(f"\n🔄 收到预设切换请求: {text}")
+            if "自定义" in text:
+                self.tab_custom.setVisible(True)
+            else:
+                self.tab_custom.setVisible(False)
+                
+            if text not in self.preset_configs or not self.preset_configs[text]:
+                #print("⚠️ 该选项为自定义或空预设，跳过自动拨动。")
+                return
+                
+            cfg = self.preset_configs[text]
+            #print(f"✅ 提取到预设配置: {cfg}")
+
+            # 暂时屏蔽信号
+            self.cb_v_encoder.blockSignals(True)
+            self.cb_v_fps.blockSignals(True)
+            self.cb_v_res.blockSignals(True)
+            self.cb_v_rc.blockSignals(True)
+            self.sld_v_value.blockSignals(True)
+            self.cb_a_encoder.blockSignals(True)
+            self.cb_a_bitrate.blockSignals(True)
+            self.cb_a_sample.blockSignals(True)
+
+            #print("👉 正在拨动视频基础参数...")
+            self.cb_v_encoder.setCurrentText(cfg["v_enc"])
+            self.cb_v_fps.setCurrentText(cfg["fps"])
+            self.cb_v_res.setCurrentText(cfg["res"])
+            
+            #print("👉 正在拨动码率控制模式...")
+            self.cb_v_rc.setCurrentText(cfg["rc"])
+            self.cb_v_rc.blockSignals(False)
+            self.update_slider_range(cfg["rc"]) 
+            
+            #print("👉 正在计算并拨动滑块...")
+            self.sld_v_value.blockSignals(True) 
+            if cfg["rc"] == "cqp":
+                self.sld_v_value.setValue(cfg["val"])
+            else:
+                slider_pos = self.get_reverse_mapped_slider_val(cfg["val"])
+                self.sld_v_value.setValue(slider_pos)
+                
+            #print("👉 正在拨动音频参数...")
+            self.cb_a_encoder.setCurrentText(cfg["a_enc"])
+            self.cb_a_bitrate.setCurrentText(cfg["a_bit"])
+            self.cb_a_sample.setCurrentText(cfg["a_sample"])
+
+            #print("✅ 拨动完成，正在恢复信号！")
+            self.cb_v_encoder.blockSignals(False)
+            self.cb_v_fps.blockSignals(False)
+            self.cb_v_res.blockSignals(False)
+            self.sld_v_value.blockSignals(False)
+            self.cb_a_encoder.blockSignals(False)
+            self.cb_a_bitrate.blockSignals(False)
+            self.cb_a_sample.blockSignals(False)
+            
+            self.update_slider_label()
+            #print("🎉 UI 预设状态同步完美结束！\n")
+
+        except Exception as e:
+            import traceback
+            print(f"\n💥💥 切换预设时发生致命错误: {e}")
+            traceback.print_exc()
+            print("💥💥 上面的报错就是导致参数没变的罪魁祸首！\n")
+    
     def probe_video_info(self, file_path):
         import json # 局部引入，保持顶部代码整洁
         import subprocess
@@ -309,28 +361,22 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.txt_output.setText(new_path)
     
     def build_ffmpeg_args(self):
-        preset = self.combo_preset.currentText()
-        
-        # 1. 预设逻辑：直接从动态生成的配置字典中获取参数
-        if preset != "⚙️ 自定义参数...":
-            return self.preset_configs.get(preset, []).copy()
-
-        # 2. 自定义参数逻辑：深度适配厂商差异并接入滑块数值
+        # ✨ 核心修复 3：彻底删除了最前面的 if 拦截器！
+        # 现在的唯一真理来源就是 UI 面板！
         args = []
         v_enc = self.cb_v_encoder.currentText()
         is_nvenc = "nvenc" in v_enc
         is_amf = "amf" in v_enc
         is_qsv = "qsv" in v_enc
-        
+        is_cpu = "lib" in v_enc
+
         # --- 视频编码部分 ---
         if v_enc == "copy":
             args.extend(["-c:v", "copy"])
         else:
             args.extend(["-c:v", v_enc])
-
-            # ✨ 核心修复 1：H264 硬件编码器的护城河
-            # 强制所有进入 H264 硬件的视频统一转换为标准的 8-bit yuv420p 格式并锁定 high 规格
-            # 这能解决 99% 的 h264_nvenc 和 h264_amf 突然暴毙的问题
+            
+            # NVIDIA / AMD 硬件 H264 的护城河 (修复暴毙问题)
             if v_enc in ["h264_nvenc", "h264_amf"]:
                 args.extend(["-pix_fmt", "yuv420p", "-profile:v", "high"])
             
@@ -339,53 +385,49 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             if fps != "保持源": 
                 args.extend(["-r", fps])
             
-            # 分辨率处理 (保持 scale 滤镜逻辑)
+            # 分辨率处理
             res = self.cb_v_res.currentText()
             if res == "1080p": args.extend(["-vf", "scale=-1:1080"])
             elif res == "720p": args.extend(["-vf", "scale=-1:720"])
             elif res == "2160p": args.extend(["-vf", "scale=-1:2160"])
             elif res == "1440p": args.extend(["-vf", "scale=-1:1440"])
                 
-            # --- 码率控制适配 (彻底扫清厂商方言壁垒) ---
+            # --- 码率控制适配 (接入最新非线性滑块逻辑) ---
             rc_mode = self.cb_v_rc.currentText()
-            val_int = self.sld_v_value.value() 
             
             if rc_mode == "cqp":
-                val = str(val_int)
+                val = str(self.sld_v_value.value()) # CQP 保持线性，直接拿原值
                 if is_nvenc:
-                    # ✨ 核心修复 2：NVENC 真正的“恒定画质”最佳实践
-                    # 用 vbr 模式挂载 0 码率，配合 -cq 控制，彻底抛弃不稳定的 constqp
+                    # NVENC 真正的“恒定画质”最佳实践
                     args.extend(["-rc", "vbr", "-cq", val, "-b:v", "0"])
                 elif is_amf:
                     args.extend(["-rc", "cqp", "-qp_i", val, "-qp_p", val])
                 elif is_qsv:
-                    args.extend(["-global_quality", val]) # Intel 的恒定质量方言
+                    args.extend(["-global_quality", val])
                 else:
-                    # 纯 CPU (libx264/x265/svtav1) 必须用 -crf
-                    args.extend(["-crf", val]) 
+                    args.extend(["-crf", val])
                     
             elif rc_mode == "vbr":
+                val_int = self.get_mapped_bitrate(self.sld_v_value.value()) # VBR 拿非线性映射后的真实码率
                 val = f"{val_int}k"
                 if is_nvenc:
                     args.extend(["-rc", "vbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
                 elif is_amf:
-                    # AMD 的 VBR 方言叫 vbr_peak
                     args.extend(["-rc", "vbr_peak", "-b:v", val])
                 else:
-                    # CPU 和通用的 VBR 写法
                     args.extend(["-b:v", val])
                     
             elif rc_mode == "cbr":
+                val_int = self.get_mapped_bitrate(self.sld_v_value.value()) # CBR 拿非线性映射后的真实码率
                 val = f"{val_int}k"
                 if is_nvenc:
                     args.extend(["-rc", "cbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
                 elif is_amf:
                     args.extend(["-rc", "cbr", "-b:v", val])
                 else:
-                    # CPU 强行 CBR 的标准做法是锁死 maxrate 和 bufsize
                     args.extend(["-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
 
-        # --- 音频部分 (完全保留原有逻辑) ---
+        # --- 音频部分 ---
         a_enc = self.cb_a_encoder.currentText()
         if "剥离静音" in a_enc: 
             args.extend(["-an"])
@@ -393,10 +435,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             args.extend(["-c:a", "copy"])
         else:
             args.extend(["-c:a", a_enc])
-            # 音频码率处理
             ab = self.cb_a_bitrate.currentText()
             args.extend(["-b:a", ab])
-            # 采样率处理
             ar = self.cb_a_sample.currentText()
             if ar != "保持源": 
                 args.extend(["-ar", ar])
@@ -477,6 +517,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         time_match = re.search(r"time=(\d{2}:\d{2}:\d{2}\.\d{2})", text)
         # 匹配格式如 speed=12.9x
         speed_match = re.search(r"speed=\s*([\d\.]+)x", text)
+        storage_match = re.search(r"size=\s*([\d\.]+)KiB", text)
 
         if time_match:
             time_str = time_match.group(1)
@@ -491,10 +532,20 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             # 限制在 0-100 之间，防止浮点微小误差导致进度条溢出报错
             percent = max(0, min(100, percent))
             self.progress_bar.setValue(percent)
+            
+            # 格式化储存大小显示
+            if storage_match:
+                size_kib = float(storage_match.group(1))
+                if size_kib >= 1000 * 1000:
+                    storage_text = f"{size_kib / (1000 * 1000):.2f} GiB"
+                elif size_kib >= 1000:
+                    storage_text = f"{size_kib / 1000:.2f} MiB"
+                else:
+                    storage_text = f"{size_kib:.2f} KiB"
 
             # 5. 更新状态栏面板
             speed_text = speed_match.group(1) if speed_match else "--"
-            self.lbl_status.setText(f"状态: 狂飙压制中... | 速度: {speed_text}x | 当前进度: {time_str}")
+            self.lbl_status.setText(f"状态: 狂飙压制中... | 速度: {speed_text}x | 当前进度: {time_str} | 当前文件大小：{storage_text}")
         
     def update_preview(self):
         if not os.path.exists(self.preview_path):
@@ -558,8 +609,9 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         
     def get_video_duration(self, file_path):
         # 组装探针命令：只输出格式的时长，去掉所有多余的包装文本
+        # ✨ 修复：接入寻路雷达，精准呼叫 tools 目录下的 ffprobe.exe
         cmd = [
-            "ffprobe", "-v", "error", 
+            get_ext_path("ffprobe.exe"), "-v", "error", 
             "-show_entries", "format=duration", 
             "-of", "default=noprint_wrappers=1:nokey=1", 
             file_path
@@ -601,14 +653,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         file_path, _ = QFileDialog.getSaveFileName(self, "设置导出路径", self.txt_output.text(), "视频文件 (*.mp4)")
         if file_path:
             self.txt_output.setText(file_path)
-    
-    def toggle_custom_tab(self, text):
-        # 只有当用户选中带有“自定义”字样的选项时，才展开下方的参数面板
-        if "自定义" in text:
-            self.tab_custom.setVisible(True)
-        else:
-            self.tab_custom.setVisible(False)
-    
+
     def closeEvent(self, event: QCloseEvent):
         if hasattr(self, 'worker') and self.worker.isRunning():
             reply = QMessageBox.question(self, '确认退出', "压制尚未完成，确定要强行退出并放弃任务吗？",

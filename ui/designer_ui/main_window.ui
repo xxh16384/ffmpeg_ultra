@@ -150,6 +150,8 @@
             <item><property name="text"><string>320k</string></property></item>
             <item><property name="text"><string>192k</string></property></item>
             <item><property name="text"><string>128k</string></property></item>
+            <item><property name="text"><string>96k</string></property></item>
+            <item><property name="text"><string>64k</string></property></item>
            </widget>
           </item>
           <item row="2" column="0"><widget class="QLabel" name="lbl_a3"><property name="text"><string>采样率:</string></property></widget></item>
@@ -231,7 +233,7 @@
       <item>
        <widget class="QLabel" name="lbl_status">
         <property name="styleSheet"><string>color: #666666;</string></property>
-        <property name="text"><string>状态: 闲置 | 速度: -- | 剩余时间: --</string></property>
+        <property name="text"><string>状态: 闲置 | 速度: -- | 剩余时间: -- |  当前文件大小: --</string></property>
        </widget>
       </item>
       <item>

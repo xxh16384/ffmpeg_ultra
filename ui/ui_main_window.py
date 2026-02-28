@@ -200,6 +200,8 @@ class Ui_MainWindow(object):
         self.cb_a_bitrate.addItem("")
         self.cb_a_bitrate.addItem("")
         self.cb_a_bitrate.addItem("")
+        self.cb_a_bitrate.addItem("")
+        self.cb_a_bitrate.addItem("")
         self.cb_a_bitrate.setObjectName(u"cb_a_bitrate")
 
         self.layout_audio.setWidget(1, QFormLayout.ItemRole.FieldRole, self.cb_a_bitrate)
@@ -353,6 +355,8 @@ class Ui_MainWindow(object):
         self.cb_a_bitrate.setItemText(0, QCoreApplication.translate("MainWindow", u"320k", None))
         self.cb_a_bitrate.setItemText(1, QCoreApplication.translate("MainWindow", u"192k", None))
         self.cb_a_bitrate.setItemText(2, QCoreApplication.translate("MainWindow", u"128k", None))
+        self.cb_a_bitrate.setItemText(3, QCoreApplication.translate("MainWindow", u"96k", None))
+        self.cb_a_bitrate.setItemText(4, QCoreApplication.translate("MainWindow", u"64k", None))
 
         self.lbl_a3.setText(QCoreApplication.translate("MainWindow", u"\u91c7\u6837\u7387:", None))
         self.cb_a_sample.setItemText(0, QCoreApplication.translate("MainWindow", u"\u4fdd\u6301\u6e90", None))
@@ -370,6 +374,6 @@ class Ui_MainWindow(object):
 "(\u7b49\u5f85\u538b\u5236\u5f00\u59cb...)", None))
         self.label_4.setText(QCoreApplication.translate("MainWindow", u"<b>\U0001f4ca \U0000533a\U000057df\U000056db\U0000ff1a\U00008fd0\U0000884c\U000072b6\U00006001</b>", None))
         self.lbl_status.setStyleSheet(QCoreApplication.translate("MainWindow", u"color: #666666;", None))
-        self.lbl_status.setText(QCoreApplication.translate("MainWindow", u"\u72b6\u6001: \u95f2\u7f6e | \u901f\u5ea6: -- | \u5269\u4f59\u65f6\u95f4: --", None))
+        self.lbl_status.setText(QCoreApplication.translate("MainWindow", u"\u72b6\u6001: \u95f2\u7f6e | \u901f\u5ea6: -- | \u5269\u4f59\u65f6\u95f4: -- |  \u5f53\u524d\u6587\u4ef6\u5927\u5c0f: --", None))
     # retranslateUi
 
