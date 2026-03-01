@@ -16,15 +16,16 @@ def get_ext_path(executable_name):
 def get_app_dir():
     """
     外部物理路径雷达：获取程序真正运行的物理目录
-    用于存放那些需要让用户看见、修改的配置文件
     """
     import sys, os
     if getattr(sys, 'frozen', False):
         # 如果是被打包成了 exe，返回 exe 所在的真实目录
         return os.path.dirname(sys.executable)
     else:
-        # 如果是开发环境，返回 main.py 所在的目录
-        return os.path.dirname(os.path.abspath(__file__))
+        # ✨ 核心修复：抛弃 __file__，改用 sys.argv[0]
+        # sys.argv[0] 永远指向你启动程序的那个入口文件（也就是 main.py）
+        # 这样无论这个函数被移到哪个深层文件夹，它都能精准咬死项目根目录！
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 def init_config_files():
     """初始化配置文件：如果不存在，则自动生成默认配置"""
