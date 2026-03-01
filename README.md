@@ -2,6 +2,8 @@
 
 **FFmpeg Ultra** 是一款基于 Python 和 PySide6 开发的高性能视频压制工具。 它专为追求极致效率的硬件发烧友设计，能够自动识别并榨干你电脑中 AMD、NVIDIA 或 Intel 显卡的每一分性能。
 
+**目前只支持Windows系统**
+
 ---
 
 ## ✨ 核心特性
@@ -44,7 +46,7 @@ uv run main.py
 本项目已适配单文件绿色版打包逻辑，通过 `uv` 即可一键生成独立 `.exe`：
 
 ```bash
-uv run pyinstaller --noconfirm --onefile --windowed --add-binary "ffmpeg.exe;." --add-binary "ffprobe.exe;." --name "FFmpeg_Ultra_V1.0" main.py
+uv run pyinstaller --noconfirm --onefile --windowed --add-binary "./tools/ffmpeg.exe;." --add-binary "./tools/ffprobe.exe;." --name "FFmpeg_Ultra" main.py
 
 ```
 
@@ -60,6 +62,29 @@ uv run pyinstaller --noconfirm --onefile --windowed --add-binary "ffmpeg.exe;." 
 4. **开始压制**: 点击火箭按钮，在实时预览中见证显卡的高能时刻。
 
 ---
+## 编辑预设
+
+`./config/presets.yaml`中存放了所有预设配置。首次运行打包的`.exe`程序时会自动生成文件。具体配置信息如下
+
+```
+# 📘 开发者预设配置指南 (完整版)
+# ---------------------------------------------------------------------
+# 1. name:     预设在下拉菜单中显示的名称。
+# 2. requires: 核心匹配词。代码会自动在【自检可用列表】中寻找包含此词的硬件引擎。
+#              例如 "av1" 会匹配 "av1_nvenc" 或 "av1_qsv"。
+# 3. ui_state: 定义当该预设被选中时，UI 控件应如何自动“拨动”：
+#    - v_enc:    (自动填入) 视频编码器，由 requires 匹配逻辑决定。
+#    - fps:      帧率。必须匹配下拉菜单中的现有字符串（如 "24", "30", "60", "保持源"）。
+#    - res:      分辨率。必须匹配下拉菜单中的现有字符串（如 "720p", "1080p", "保持源"）。
+#    - rc:       码率控制模式。可选 "cqp", "vbr", "cbr"。
+#    - val:      控制数值。
+#                - CQP 模式下：填 0-51（越小画质越好）。
+#                - VBR/CBR 模式下：填目标码率整数（单位为 kbps，如 5000）。
+#    - a_enc:    音频编码器。必须匹配下拉菜单字符串（如 "aac", "mp3", "copy", "an (剥离静音)"）。
+#    - a_bit:    音频码率。必须匹配下拉菜单字符串（如 "128k", "192k", "320k"）。
+#    - a_sample: 音频采样率。必须匹配下拉菜单字符串（如 "44100", "48000", "保持源"）。
+```
+
 
 ## 🤝 贡献与反馈
 

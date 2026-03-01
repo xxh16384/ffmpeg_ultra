@@ -9,4 +9,5 @@ wheels/
 # Virtual environments
 .venv
 hardware_report.txt
+*.spec
 
