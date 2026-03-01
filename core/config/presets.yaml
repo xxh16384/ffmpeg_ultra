@@ -1,0 +1,44 @@
+presets:
+  - name: "会议录屏极致瘦身 (AV1, 30帧, CQP)"
+    requires: "av1"
+    ui_state:
+      fps: "30"
+      res: "保持源"
+      rc: "cqp"
+      val: 32
+      a_enc: "aac"
+      a_bit: "128k"
+      a_sample: "保持源"
+
+  - name: "高画质收藏版 (HEVC/H.265, VBR)"
+    requires: "hevc"
+    ui_state:
+      fps: "保持源"
+      res: "保持源"
+      rc: "vbr"
+      val: 5000
+      a_enc: "aac"
+      a_bit: "320k"
+      a_sample: "保持源"
+
+  - name: "老设备高兼容版 (H.264, CBR)"
+    requires: "264"
+    ui_state:
+      fps: "保持源"
+      res: "保持源"
+      rc: "cbr"
+      val: 2000
+      a_enc: "aac"
+      a_bit: "192k"
+      a_sample: "保持源"
+
+  - name: "压片战争最小视频 (HEVC/H.265, VBR)"
+    requires: "x265"
+    ui_state:
+      fps: "24"
+      res: "720p"
+      rc: "vbr"
+      val: 100
+      a_enc: "aac"
+      a_bit: "64k"
+      a_sample: "保持源"

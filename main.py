@@ -6,8 +6,9 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QCloseEvent
 from PySide6.QtCore import Qt
 
-from core.utils import get_ext_path
+from core.utils import get_ext_path, get_app_dir, init_config_files
 from core.worker import FFmpegWorker
+from core.engine import get_video_duration, probe_video_info
 from ui.ui_main_window import Ui_MainWindow
 
 class FFmpegGUI(QMainWindow, Ui_MainWindow):
@@ -156,8 +157,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                     print(f"✅ 探测成功: {enc}")
                 else:
                     # 即使失败，我们也要看一眼为什么失败 (特别是 N 卡)
-                    #print(f"❌ {enc} 失败原因摘要: {result.stderr[-100:]}")
-                    pass
+                    print(f"❌ {enc} 失败原因摘要: {result.stderr[-100:]}")
             except Exception as e:
                 print(f"⚠️ {enc} 探测超时或异常: {e}")
                 
@@ -176,8 +176,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         raw_presets = []
 
         # 1. 动态定位 config/presets.yaml 的绝对路径
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        yaml_path = os.path.join(base_dir, "config", "presets.yaml")
+        yaml_path = os.path.join(get_app_dir(), "config", "presets.yaml")
 
         # 2. 安全读取 YAML 文件
         try:
@@ -208,7 +207,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         import yaml
         import os
         
-        yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "tooltips.yaml")
+        yaml_path = os.path.join(get_app_dir(), "config", "tooltips.yaml")
         try:
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 tips = yaml.safe_load(f)
@@ -292,57 +291,6 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             print(f"\n💥💥 切换预设时发生致命错误: {e}")
             traceback.print_exc()
             print("💥💥 上面的报错就是导致参数没变的罪魁祸首！\n")
-    
-    def probe_video_info(self, file_path):
-        import json # 局部引入，保持顶部代码整洁
-        import subprocess
-        
-        # 呼叫 ffprobe，要求它以规整的 JSON 格式吐出所有底层流信息
-        cmd = [
-            get_ext_path("ffprobe.exe"), "-v", "quiet", "-print_format", "json",
-            "-show_format", "-show_streams", file_path
-        ]
-        
-        try:
-            CREATE_NO_WINDOW = 0x08000000
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=CREATE_NO_WINDOW)
-            data = json.loads(result.stdout)
-            
-            # 提取视频流 (排除音频和字幕流)
-            video_stream = next((s for s in data.get('streams', []) if s.get('codec_type') == 'video'), None)
-            if not video_stream:
-                return "❌ 未能识别到有效的视频流"
-
-            codec = video_stream.get('codec_name', 'UNKNOWN').upper()
-            width = video_stream.get('width', 0)
-            height = video_stream.get('height', 0)
-            
-            # 精确帧率计算 (ffprobe 输出的通常是 60000/1001 这种除法格式)
-            fps_str = video_stream.get('r_frame_rate', '0/0')
-            if '/' in fps_str:
-                num, den = fps_str.split('/')
-                fps = round(int(num) / int(den), 2) if int(den) != 0 else 0
-            else:
-                fps = float(fps_str)
-                
-            # 整体码率提取 (转换为更易读的 Mbps)
-            bitrate_bps = data.get('format', {}).get('bit_rate') or video_stream.get('bit_rate')
-            if bitrate_bps:
-                bitrate_display = f"{round(int(bitrate_bps) / 1000000, 2)} Mbps"
-            else:
-                bitrate_display = "动态/未知"
-
-            # 组装极客风格的终端面板文本
-            return (
-                f"=== 源视频信息 ===\n\n"
-                f"[ 编码 ] {codec}\n"
-                f"[ 分辨率 ] {width} x {height}\n"
-                f"[ 帧率 ] {fps} FPS\n"
-                f"[ 码率 ] {bitrate_display}"
-            )
-            
-        except Exception as e:
-            return f"❌ 探针读取失败: {e}"
     
     def change_output_extension(self, new_ext):
         # 拿到当前输入框里的完整路径
@@ -461,7 +409,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.lbl_status.setText("状态: 连接编码器...")
 
         # 3. 在开启多线程前，用探针瞬间读取真实时长并保存为实例属性
-        self.total_seconds = self.get_video_duration(input_path)
+        self.total_seconds = get_video_duration(input_path)
         print(f"探针成功获取视频总时长: {self.total_seconds} 秒")
 
         # 4. === 找回失踪的预览开关逻辑与路径生成 ===
@@ -606,24 +554,6 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                 self.lbl_preview.clear()
                 self.lbl_preview.setText("压制已完成\n(画面预览结束)")
             print("====== 压制彻底结束！======")
-        
-    def get_video_duration(self, file_path):
-        # 组装探针命令：只输出格式的时长，去掉所有多余的包装文本
-        # ✨ 修复：接入寻路雷达，精准呼叫 tools 目录下的 ffprobe.exe
-        cmd = [
-            get_ext_path("ffprobe.exe"), "-v", "error", 
-            "-show_entries", "format=duration", 
-            "-of", "default=noprint_wrappers=1:nokey=1", 
-            file_path
-        ]
-        # 同样使用隐形窗口参数，防止弹出黑框
-        CREATE_NO_WINDOW = 0x08000000
-        try:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=CREATE_NO_WINDOW)
-            return float(result.stdout.strip())
-        except Exception as e:
-            print(f"探针读取失败: {e}")
-            return 1  # 遇到极端错误时返回1，防止后续进度条计算时出现“除以0”的崩溃
     
     def select_input_file(self):
         # 呼出 Windows 原生文件选择框，限制只能选常见视频格式
@@ -645,7 +575,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             QApplication.processEvents() # 强制刷新 UI，让文字瞬间亮起
             
             # 呼叫探针，把拿到情报贴在屏幕上
-            info_text = self.probe_video_info(file_path)
+            info_text = probe_video_info(file_path)
             self.lbl_preview.setText(info_text)
 
     def select_output_file(self):
@@ -681,6 +611,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
     
 
 if __name__ == "__main__":
+    init_config_files()
     app = QApplication(sys.argv)
     window = FFmpegGUI()
     window.show()
