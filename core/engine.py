@@ -2,6 +2,88 @@ import json
 import subprocess
 from core.utils import get_ext_path
 
+def build_ffmpeg_args(config):
+    """
+    纯净的参数翻译引擎：不再依赖任何 UI 控件，只负责把字典翻译成命令行
+    :param config: 包含所有 UI 状态的字典
+    """
+    args = []
+    v_enc = config["v_enc"]
+    is_nvenc = "nvenc" in v_enc
+    is_amf = "amf" in v_enc
+    is_qsv = "qsv" in v_enc
+    is_cpu = "lib" in v_enc
+
+    # --- 视频编码部分 ---
+    if v_enc == "copy":
+        args.extend(["-c:v", "copy"])
+    else:
+        args.extend(["-c:v", v_enc])
+        
+        # NVIDIA / AMD 硬件 H264 的护城河
+        if v_enc in ["h264_nvenc", "h264_amf"]:
+            args.extend(["-pix_fmt", "yuv420p", "-profile:v", "high"])
+        
+        # 帧率处理
+        fps = config["fps"]
+        if fps != "保持源": 
+            args.extend(["-r", fps])
+        
+        # 分辨率处理
+        res = config["res"]
+        if res == "1080p": args.extend(["-vf", "scale=-1:1080"])
+        elif res == "720p": args.extend(["-vf", "scale=-1:720"])
+        elif res == "2160p": args.extend(["-vf", "scale=-1:2160"])
+        elif res == "1440p": args.extend(["-vf", "scale=-1:1440"])
+            
+        # --- 码率控制适配 ---
+        rc = config["rc"]
+        
+        if rc == "cqp":
+            val = str(config["cqp_val"]) 
+            if is_nvenc:
+                args.extend(["-rc", "vbr", "-cq", val, "-b:v", "0"])
+            elif is_amf:
+                args.extend(["-rc", "cqp", "-qp_i", val, "-qp_p", val])
+            elif is_qsv:
+                args.extend(["-global_quality", val])
+            else:
+                args.extend(["-crf", val])
+                
+        elif rc == "vbr":
+            val = f"{config['vbr_cbr_val']}k"
+            if is_nvenc:
+                args.extend(["-rc", "vbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
+            elif is_amf:
+                args.extend(["-rc", "vbr_peak", "-b:v", val])
+            else:
+                args.extend(["-b:v", val])
+                
+        elif rc == "cbr":
+            val = f"{config['vbr_cbr_val']}k"
+            if is_nvenc:
+                args.extend(["-rc", "cbr", "-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
+            elif is_amf:
+                args.extend(["-rc", "cbr", "-b:v", val])
+            else:
+                args.extend(["-b:v", val, "-maxrate:v", val, "-bufsize:v", val])
+
+    # --- 音频部分 ---
+    a_enc = config["a_enc"]
+    if "剥离静音" in a_enc: 
+        args.extend(["-an"])
+    elif a_enc == "copy": 
+        args.extend(["-c:a", "copy"])
+    else:
+        args.extend(["-c:a", a_enc])
+        ab = config["a_bit"]
+        args.extend(["-b:a", ab])
+        ar = config["a_sample"]
+        if ar != "保持源": 
+            args.extend(["-ar", ar])
+
+    return args
+
 def get_video_duration(file_path):
     cmd = [
         get_ext_path("ffprobe.exe"), "-v", "error", 
@@ -68,3 +150,39 @@ def probe_video_info(file_path):
         )
     except Exception as e:
         return f"❌ 探针读取失败: {e}"
+
+def check_single_encoder(enc):
+    """
+    独立硬件点火器：无情地测试指定的单一编码器是否可用。
+    没有任何 UI 逻辑，只返回 (是否成功, 错误信息摘要)
+    """
+    import subprocess
+    from core.utils import get_ext_path
+    
+    cmd = [
+        get_ext_path("ffmpeg.exe"), "-y", 
+        "-f", "lavfi", "-i", "color=c=black:s=320x240", 
+        "-vframes", "1", 
+        "-c:v", enc, 
+        "-pix_fmt", "yuv420p", 
+        "-f", "null", "-"
+    ]
+    
+    CREATE_NO_WINDOW = 0x08000000
+    try:
+        result = subprocess.run(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True, 
+            encoding='utf-8', 
+            creationflags=CREATE_NO_WINDOW, 
+            timeout=5 
+        )
+        
+        if result.returncode == 0:
+            return True, ""
+        else:
+            return False, result.stderr[-100:]
+    except Exception as e:
+        return False, str(e)

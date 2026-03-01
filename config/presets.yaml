@@ -27,10 +27,10 @@ presets:
   - name: "会议录屏极致瘦身 (AV1, 30帧, CQP)"
     requires: "av1"
     ui_state:
-      fps: "30"
+      fps: "24"
       res: "保持源"
       rc: "cqp"
-      val: 32
+      val: 45
       a_enc: "aac"
       a_bit: "128k"
       a_sample: "保持源"

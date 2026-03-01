@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, yaml
 
 def get_ext_path(executable_name):
     """
@@ -27,6 +27,40 @@ def get_app_dir():
         # 这样无论这个函数被移到哪个深层文件夹，它都能精准咬死项目根目录！
         return os.path.dirname(os.path.abspath(sys.argv[0]))
 
+def get_mapped_bitrate(slider_val):
+    """将 0-100 的滑块值进行非线性(三次幂)映射到 50-30000 kbps"""
+    min_kbps = 50
+    max_kbps = 30000
+    # 使用三次幂函数：滑块在前半段数字变化极慢，后半段变化极快
+    ratio = slider_val / 100.0
+    mapped_val = min_kbps + (max_kbps - min_kbps) * (ratio ** 3)
+    # 把计算结果规整一下，向下取整到最接近的 10，让 UI 看起来更整洁
+    return int(round(mapped_val / 10) * 10)
+
+def get_reverse_mapped_slider_val(target_kbps):
+    """将真实的码率 (如 5000 kbps) 逆向推导回 0-100 的滑块物理刻度"""
+    min_kbps = 50
+    max_kbps = 30000
+    if target_kbps <= min_kbps: return 0
+    if target_kbps >= max_kbps: return 100
+    # 逆向公式：开三次方根
+    ratio = ((target_kbps - min_kbps) / (max_kbps - min_kbps)) ** (1/3.0)
+    return int(round(ratio * 100))
+
+def read_yaml_config(filename):
+    """通用 YAML 读取工具：自动定位 config 目录并安全读取"""
+    yaml_path = os.path.join(get_app_dir(), "config", filename)
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+            return data if data is not None else {}
+    except FileNotFoundError:
+        print(f"⚠️ 找不到配置文件: {yaml_path}")
+        return {}
+    except Exception as e:
+        print(f"💥 读取 {filename} 发生错误: {e}")
+        return {}
+
 def init_config_files():
     """初始化配置文件：如果不存在，则自动生成默认配置"""
     import os
@@ -48,10 +82,10 @@ def init_config_files():
   - name: "会议录屏极致瘦身 (AV1, 30帧, CQP)"
     requires: "av1"
     ui_state:
-      fps: "30"
+      fps: "24"
       res: "保持源"
       rc: "cqp"
-      val: 32
+      val: 45
       a_enc: "aac"
       a_bit: "128k"
       a_sample: "保持源"
