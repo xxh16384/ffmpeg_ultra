@@ -10,4 +10,4 @@ wheels/
 .venv
 hardware_report.txt
 *.spec
-
+upx.exe

@@ -1,15 +1,15 @@
 import sys,os,tempfile
-import subprocess
 import re
 from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageBox,QProgressDialog)
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QCloseEvent
+from PySide6.QtGui import QPixmap, QCloseEvent, QIcon
 from PySide6.QtCore import Qt
 
-from core.utils import get_ext_path, get_app_dir, init_config_files, get_mapped_bitrate, get_reverse_mapped_slider_val,read_yaml_config
+from core.utils import get_ext_path, init_config_files, get_mapped_bitrate, get_reverse_mapped_slider_val,read_yaml_config
 from core.worker import FFmpegWorker
 from core.engine import get_video_duration, probe_video_info,build_ffmpeg_args,check_single_encoder
 from ui.ui_main_window import Ui_MainWindow
+import ui.resources_rc
 from core.__version__ import __title__, __version__
 
 class FFmpegGUI(QMainWindow, Ui_MainWindow):
@@ -20,6 +20,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         # ==========================================
         self.setupUi(self)
         self.setWindowTitle(f"{__title__} {__version__}")
+        
+        self.setWindowIcon(QIcon(":/icons/icon.ico"))
 
         # ==========================================
         # 2. 保留原有的核心初始化逻辑：硬件自检与动态预设

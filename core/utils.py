@@ -1,17 +1,30 @@
-import sys, os, yaml
+import sys, os, yaml,shutil
 
 def get_ext_path(executable_name):
     """
-    终极寻路雷达：判断当前是开发环境还是单文件 exe 环境
+    终极智能寻路雷达：支持“自带运行库(Ultra版)”和“依赖环境变量(Lite版)”双模式自动切换
     """
+    # 1. 尝试在 PyInstaller 临时释放目录中找 (Ultra 打包版)
     if hasattr(sys, '_MEIPASS'):
-        # ✨ 核心修复：打包命令用的是 ";."，引擎被释放在了临时目录的最外层根目录。
-        # 所以这里去掉了 "tools" 这一层！
-        return os.path.join(sys._MEIPASS, executable_name)
+        bundled_path = os.path.join(sys._MEIPASS, executable_name)
+        if os.path.exists(bundled_path):
+            return bundled_path
+            
+    # 2. 尝试在源码目录的 tools 文件夹中找 (本地开发环境)
     else:
-        # 开发环境下（源码运行）：获取项目根目录并进入 tools 文件夹
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(base_dir, "tools", executable_name)
+        dev_path = os.path.join(base_dir, "tools", executable_name)
+        if os.path.exists(dev_path):
+            return dev_path
+
+    # 3. ✨ 核心魔法：如果上面都没找到（说明这是没塞体积的 Lite 版），去系统环境变量里捞人！
+    # shutil.which 会自动扫描 Windows 的 PATH 环境变量
+    system_path = shutil.which(executable_name)
+    if system_path:
+        return system_path
+        
+    # 4. 终极兜底：如果连系统环境变量里都没有，直接返回裸名字，让系统直接报错
+    return executable_name
     
 def get_app_dir():
     """
