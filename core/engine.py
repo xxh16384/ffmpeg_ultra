@@ -174,6 +174,7 @@ def check_single_encoder(enc):
             cmd, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE, 
+            stdin=subprocess.DEVNULL,  # ✨ 补上防止底层卡顿的关键通道截断
             text=True, 
             encoding='utf-8', 
             creationflags=CREATE_NO_WINDOW, 

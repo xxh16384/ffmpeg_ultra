@@ -22,6 +22,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.setWindowTitle(f"{__title__} {__version__}")
         
         self.setWindowIcon(QIcon(":/icons/icon.ico"))
+        self.setAcceptDrops(True)
 
         # ==========================================
         # 2. 保留原有的核心初始化逻辑：硬件自检与动态预设
@@ -56,6 +57,49 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         # 初始化：手动触发一次范围设定（默认 CQP）
         self.update_slider_range("cqp")
         self.toggle_custom_tab(list(self.preset_configs.keys())[0])
+
+    def dragEnterEvent(self, event):
+        """物理事件 1：当有文件被拖入窗口领空时触发"""
+        # 嗅探拖入的是不是本地物理文件（过滤掉纯文本等无效拖拽）
+        if event.mimeData().hasUrls():
+            event.accept() # 允许降落
+        else:
+            event.ignore() # 拒绝降落，鼠标会变成红色的禁止符号
+
+    def dropEvent(self, event):
+        """物理事件 2：当鼠标在窗口内松开，文件真实落地时触发"""
+        urls = event.mimeData().urls()
+        if not urls:
+            return
+
+        # 获取第一个被拖入文件的绝对物理路径
+        input_path = urls[0].toLocalFile()
+
+        import os
+        # 严格过滤：确保拖进来的是一个文件，而不是一个文件夹
+        if os.path.isfile(input_path):
+            
+            # 1. 填入你的输入文本框 (⚠️ 请替换为你实际的文本框控件名)
+            self.txt_input.setText(input_path)
+            
+            # 2. 自动路径大脑：解析目录与文件名，生成默认输出路径
+            directory, filename = os.path.split(input_path)
+            name, ext = os.path.splitext(filename)
+            
+            # 嗅探当前 UI 界面上选中的目标输出格式（假设你的格式下拉框叫 self.cb_format）
+            # 如果没找到，就回退使用原视频的后缀名
+            if hasattr(self, 'cb_format'):
+                target_ext = self.cb_format.currentText()
+                if not target_ext.startswith('.'):
+                    target_ext = f".{target_ext}"
+            else:
+                target_ext = ext
+                
+            # 拼接物理路径：原目录 / 原文件名_output.后缀
+            output_path = os.path.join(directory, f"{name}_output{target_ext}")
+            
+            # 3. 填入你的输出文本框 (⚠️ 请替换为你实际的文本框控件名)
+            self.txt_output.setText(output_path)
 
     def update_slider_range(self, mode):
         """根据选择的 RC 模式，动态调整滑块的最小值、最大值和当前值"""
@@ -264,8 +308,6 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         """
         数据打包专员：负责把当前 UI 界面上的状态打包成字典，送给底层引擎
         """
-        # 注意：这里用到了我们之前移走的数学函数 get_mapped_bitrate
-        # 确保你的 main.py 顶部有：from core.utils import get_mapped_bitrate
         return {
             "v_enc": self.cb_v_encoder.currentText(),
             "fps": self.cb_v_fps.currentText(),
