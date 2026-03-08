@@ -1,8 +1,8 @@
 import os,tempfile
 import re
-from PySide6.QtWidgets import (QMainWindow, QFileDialog, QMessageBox,QProgressDialog)
+from PySide6.QtWidgets import (QMainWindow, QFileDialog, QMessageBox, QProgressDialog, QMenu)
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QCloseEvent, QIcon
+from PySide6.QtGui import QPixmap, QCloseEvent, QIcon, QAction
 from PySide6.QtCore import Qt
 
 from core.utils import get_ext_path, get_mapped_bitrate, get_reverse_mapped_slider_val,read_yaml_config
@@ -54,6 +54,28 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.btn_input.clicked.connect(self.select_input_file)
         self.btn_output.clicked.connect(self.select_output_file)
         
+        # Initialize Queue Tracking
+        self.task_queue = []  # List of dicts: {'input': str, 'output': str, 'ui_state': dict, 'status': str}
+        self.current_task_idx = 0
+        self.is_queue_running = False
+
+        # Init Queue UI Table (Setup headers correctly)
+        self.table_queue.setColumnCount(3)
+        self.table_queue.setHorizontalHeaderLabels(["源视频", "目标格式", "状态"])
+
+        # Buttons logic
+        self.btn_add_queue.clicked.connect(self.add_to_queue)
+        self.btn_update_queue.clicked.connect(self.update_queue_item)
+        self.btn_reset_queue.clicked.connect(self.reset_queue_item)
+        self.btn_start_queue.clicked.connect(self.start_queue)
+        self.btn_clear_queue.clicked.connect(self.clear_queue)
+        
+        
+        # Table Selection & Context Menu Logic
+        self.table_queue.itemSelectionChanged.connect(self.load_queue_item_to_ui)
+        self.table_queue.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_queue.customContextMenuRequested.connect(self.show_queue_context_menu)
+
         # 初始化：手动触发一次范围设定（默认 CQP）
         self.update_slider_range("cqp")
         self.toggle_custom_tab(list(self.preset_configs.keys())[0])
@@ -72,34 +94,32 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         if not urls:
             return
 
-        # 获取第一个被拖入文件的绝对物理路径
-        input_path = urls[0].toLocalFile()
-
-        import os
-        # 严格过滤：确保拖进来的是一个文件，而不是一个文件夹
-        if os.path.isfile(input_path):
-            
-            # 1. 填入你的输入文本框 (⚠️ 请替换为你实际的文本框控件名)
-            self.txt_input.setText(input_path)
-            
-            # 2. 自动路径大脑：解析目录与文件名，生成默认输出路径
-            directory, filename = os.path.split(input_path)
-            name, ext = os.path.splitext(filename)
-            
-            # 嗅探当前 UI 界面上选中的目标输出格式（假设你的格式下拉框叫 self.cb_format）
-            # 如果没找到，就回退使用原视频的后缀名
-            if hasattr(self, 'cb_format'):
-                target_ext = self.cb_format.currentText()
-                if not target_ext.startswith('.'):
-                    target_ext = f".{target_ext}"
-            else:
-                target_ext = ext
+        for url in urls:
+            input_path = url.toLocalFile()
+            if os.path.isfile(input_path):
+                # 自动路径大脑：解析目录与文件名，生成默认输出路径
+                directory, filename = os.path.split(input_path)
+                name, ext = os.path.splitext(filename)
                 
-            # 拼接物理路径：原目录 / 原文件名_output.后缀
-            output_path = os.path.join(directory, f"{name}_output{target_ext}")
-            
-            # 3. 填入你的输出文本框 (⚠️ 请替换为你实际的文本框控件名)
-            self.txt_output.setText(output_path)
+                if hasattr(self, 'cb_format'):
+                    target_ext = self.cb_format.currentText()
+                    if not target_ext.startswith('.'):
+                        target_ext = f".{target_ext}"
+                else:
+                    target_ext = ext
+                    
+                output_path = os.path.join(directory, f"{name}_output{target_ext}")
+                
+                # Setup UI visual for text fields using the last file
+                self.txt_input.setText(input_path)
+                self.txt_output.setText(output_path)
+                
+                # Push straight to queue
+                self.add_task_to_table(input_path, output_path, self.get_current_ui_state())
+                
+        self.lbl_status.setText(f"状态: 成功添加 {len(urls)} 个任务到队列！")
+        self.txt_input.clear()
+        self.txt_output.clear()
 
     def update_slider_range(self, mode):
         """根据选择的 RC 模式，动态调整滑块的最小值、最大值和当前值"""
@@ -322,56 +342,345 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             "a_sample": self.cb_a_sample.currentText()
         }
     
-    def start_encoding(self):
-        # 1. 动态获取界面上输入框里的路径
-        input_path = self.txt_input.text().strip()
-        output_path = self.txt_output.text().strip()
-
-        # 简单拦截：如果没选文件就点开始，弹窗警告并打断
-        if not input_path or not output_path:
-            QMessageBox.warning(self, "警告", "请先选择需要压制的视频！")
+    def start_encoding_task(self, idx):
+        # Starts a specific task from the queue
+        if idx >= len(self.task_queue):
+            QMessageBox.information(self, "完成", "队列中所有任务已压制完毕！")
+            self.is_queue_running = False
+            self.btn_start_queue.setEnabled(True)
+            self.btn_start.setEnabled(True)
             return
 
-        # 2. 锁定按钮，防止重复点击，激活暂停和停止按钮
+        task = self.task_queue[idx]
+        if task["status"] != "等待中" and task["status"] != "Pending":
+            # Skip already finished or running tasks
+            self.current_task_idx += 1
+            self.start_encoding_task(self.current_task_idx)
+            return
+
+        input_path = task["input"]
+        output_path = task["output"]
+        ui_config = task["ui_state"]
+
+        self.table_queue.setItem(idx, 2, self.create_table_item("压制中 🚀"))
+        task["status"] = "Encoding"
+        
+        # UI updates for current task
+        self.txt_input.setText(input_path)
+        self.txt_output.setText(output_path)
         self.btn_start.setEnabled(False)
         self.btn_pause.setEnabled(True)
         self.btn_stop.setEnabled(True)
         self.btn_start.setText("⏳ 压制中...")
-        self.lbl_status.setText("状态: 连接编码器...")
+        self.lbl_status.setText(f"状态: 队列第 {idx+1} 个任务...")
 
-        # 3. 在开启多线程前，用探针瞬间读取真实时长并保存为实例属性
         self.total_seconds = get_video_duration(input_path)
-        print(f"探针成功获取视频总时长: {self.total_seconds} 秒")
-
-        # 4. === 找回失踪的预览开关逻辑与路径生成 ===
+        
         self.enable_preview = self.chk_preview.isChecked()
         self.preview_temp_dir = tempfile.gettempdir() 
         self.preview_path = os.path.join(self.preview_temp_dir, "ffmpeg_preview_temp.jpg")
-
-        # 如果上次的残留图片还在，先清理掉避免画面穿越
+        
         if os.path.exists(self.preview_path):
-            try:
-                os.remove(self.preview_path)
-            except:
-                pass
+            try: os.remove(self.preview_path)
+            except: pass
 
-        # 启动前台监视器定时器
         self.preview_timer = QTimer(self)
         self.preview_timer.timeout.connect(self.update_preview)
         if self.enable_preview:
             self.lbl_preview.setText("正在连接画面源...")
             self.preview_timer.start(1000) 
-
-        # 5. 呼叫翻译官，把当前界面的选择翻译成参数列表
-        ui_config = self.get_current_ui_state()
+            
         dynamic_args = build_ffmpeg_args(ui_config)
-        print(f"生成的压制参数: {dynamic_args}") 
-
-        # 6. 创建并启动后台大心脏 (传入动态获取的路径、开关状态和翻译好的参数)
+        
         self.worker = FFmpegWorker(input_path, output_path, self.enable_preview, self.preview_path, dynamic_args)
         self.worker.log_signal.connect(self.print_log)
         self.worker.finished_signal.connect(self.encoding_finished)
         self.worker.start()
+
+    def start_encoding(self):
+        # If single task start is triggered
+        input_path = self.txt_input.text().strip()
+        output_path = self.txt_output.text().strip()
+
+        if not input_path or not output_path:
+            QMessageBox.warning(self, "警告", "请先选择需要压制的视频！")
+            return
+            
+        # Push to queue and run it
+        self.add_to_queue()
+        # Find the last added task (assuming we just added one)
+        idx = len(self.task_queue) - 1
+        self.current_task_idx = idx
+        self.start_encoding_task(idx)
+
+    def add_to_queue(self):
+        input_path = self.txt_input.text().strip()
+        output_path = self.txt_output.text().strip()
+
+        if not input_path or not output_path:
+            QMessageBox.warning(self, "警告", "请先选择需要压制的视频以添加到队列！")
+            return
+            
+        self.add_task_to_table(input_path, output_path, self.get_current_ui_state())
+        
+    def add_task_to_table(self, input_path, output_path, ui_state):
+        from PySide6.QtWidgets import QTableWidgetItem
+        task = {
+            "input": input_path,
+            "output": output_path,
+            "ui_state": ui_state,
+            "status": "等待中"
+        }
+        self.task_queue.append(task)
+        
+        row = self.table_queue.rowCount()
+        self.table_queue.insertRow(row)
+        
+        filename = os.path.basename(input_path)
+        ext = os.path.splitext(output_path)[1]
+        
+        self.table_queue.setItem(row, 0, self.create_table_item(filename))
+        self.table_queue.setItem(row, 1, self.create_table_item(f"{ui_state['v_enc']} {ext}"))
+        self.table_queue.setItem(row, 2, self.create_table_item("等待中"))
+        
+    def create_table_item(self, text):
+        from PySide6.QtWidgets import QTableWidgetItem
+        item = QTableWidgetItem(text)
+        item.setFlags(item.flags() ^ Qt.ItemIsEditable)  # Read-only
+        return item
+
+    def start_queue(self):
+        if len(self.task_queue) == 0:
+            QMessageBox.warning(self, "警告", "任务队列为空！请先添加任务。")
+            return
+        
+        if self.is_queue_running:
+            return
+            
+        self.is_queue_running = True
+        self.btn_start_queue.setEnabled(False)
+        self.btn_start.setEnabled(False)
+        
+        # Find first pending task
+        found = False
+        for i, t in enumerate(self.task_queue):
+            if t["status"] == "等待中" or t["status"] == "Pending":
+                self.current_task_idx = i
+                found = True
+                break
+                
+        if found:
+            self.start_encoding_task(self.current_task_idx)
+        else:
+            self.is_queue_running = False
+            self.btn_start_queue.setEnabled(True)
+            self.btn_start.setEnabled(True)
+            QMessageBox.information(self, "提示", "队列中没有等待中的任务。")
+            
+    def load_queue_item_to_ui(self):
+        selected_ranges = self.table_queue.selectedRanges()
+        if not selected_ranges:
+            return
+            
+        rows = []
+        for r in selected_ranges:
+            rows.extend(range(r.topRow(), r.bottomRow() + 1))
+            
+        if not rows:
+            return
+            
+        # If multiple tasks are selected, we just load the first one's config to UI but keep paths empty
+        first_row = rows[0]
+        if first_row < 0 or first_row >= len(self.task_queue):
+            return
+            
+        task = self.task_queue[first_row]
+        
+        # Restore basic paths only if a single item is selected
+        if len(rows) == 1:
+            self.txt_input.setText(task["input"])
+            self.txt_output.setText(task["output"])
+        else:
+            self.txt_input.setText(f"已选中 {len(rows)} 个任务 (批量修改模式)")
+            self.txt_output.setText("")
+        
+        # Restore format target box
+        ext = os.path.splitext(task["output"])[1]
+        for i in range(self.cb_format.count()):
+            if self.cb_format.itemText(i) == ext:
+                self.cb_format.setCurrentIndex(i)
+                break
+                
+        # Block signals temporarily to avoid redundant processing
+        # Use custom tab trick to restore config since it mimics preset parsing
+        cfg = task["ui_state"]
+        
+        self.cb_v_encoder.blockSignals(True)
+        self.cb_v_fps.blockSignals(True)
+        self.cb_v_res.blockSignals(True)
+        self.cb_v_rc.blockSignals(True)
+        self.sld_v_value.blockSignals(True)
+        self.cb_a_encoder.blockSignals(True)
+        self.cb_a_bitrate.blockSignals(True)
+        self.cb_a_sample.blockSignals(True)
+
+        self.cb_v_encoder.setCurrentText(cfg.get("v_enc", "copy"))
+        self.cb_v_fps.setCurrentText(cfg.get("fps", "保持源"))
+        self.cb_v_res.setCurrentText(cfg.get("res", "保持源"))
+        
+        self.cb_v_rc.setCurrentText(cfg.get("rc", "cqp"))
+        self.cb_v_rc.blockSignals(False)
+        self.update_slider_range(cfg.get("rc", "cqp")) 
+        
+        self.sld_v_value.blockSignals(True) 
+        if cfg.get("rc", "cqp") == "cqp":
+            self.sld_v_value.setValue(cfg.get("cqp_val", 32))
+        else:
+            slider_pos = get_reverse_mapped_slider_val(cfg.get("vbr_cbr_val", 5000))
+            self.sld_v_value.setValue(slider_pos)
+            
+        self.cb_a_encoder.setCurrentText(cfg.get("a_enc", "aac"))
+        self.cb_a_bitrate.setCurrentText(cfg.get("a_bit", "320k"))
+        self.cb_a_sample.setCurrentText(cfg.get("a_sample", "保持源"))
+
+        self.cb_v_encoder.blockSignals(False)
+        self.cb_v_fps.blockSignals(False)
+        self.cb_v_res.blockSignals(False)
+        self.sld_v_value.blockSignals(False)
+        self.cb_a_encoder.blockSignals(False)
+        self.cb_a_bitrate.blockSignals(False)
+        self.cb_a_sample.blockSignals(False)
+        
+        self.update_slider_label()
+
+    def update_queue_item(self):
+        selected_ranges = self.table_queue.selectedRanges()
+        if not selected_ranges:
+            QMessageBox.warning(self, "警告", "请先在列表中选中要修改的任务！")
+            return
+            
+        rows = []
+        for r in selected_ranges:
+            rows.extend(range(r.topRow(), r.bottomRow() + 1))
+            
+        ui_state = self.get_current_ui_state()
+        target_ext = self.cb_format.currentText()
+        if not target_ext.startswith('.'):
+            target_ext = f".{target_ext}"
+            
+        updated_count = 0
+            
+        for row in rows:
+            if row < 0 or row >= len(self.task_queue):
+                continue
+                
+            task = self.task_queue[row]
+            
+            if task["status"] == "Encoding" or task["status"] == "压制中 🚀":
+                continue # Skip running tasks
+                
+            task["ui_state"] = ui_state
+            
+            # If it is a single item update, we also update the input/output paths from text boxes
+            if len(rows) == 1:
+                input_path = self.txt_input.text().strip()
+                output_path = self.txt_output.text().strip()
+                if input_path and output_path and "批量" not in input_path:
+                    task["input"] = input_path
+                    task["output"] = output_path
+            else:
+                # For batch updating, apply the new target extension to the old output path if needed
+                old_out = task["output"]
+                base_path, _ = os.path.splitext(old_out)
+                task["output"] = base_path + target_ext
+                
+            filename = os.path.basename(task["input"])
+            ext = os.path.splitext(task["output"])[1]
+            
+            self.table_queue.setItem(row, 0, self.create_table_item(filename))
+            self.table_queue.setItem(row, 1, self.create_table_item(f"{ui_state['v_enc']} {ext}"))
+            updated_count += 1
+            
+        if updated_count > 0:
+            QMessageBox.information(self, "成功", f"成功更新了 {updated_count} 个任务配置！")
+        else:
+            QMessageBox.warning(self, "跳过", "未更新任何任务 (可能选中的任务正在压制中)。")
+        
+    def reset_queue_item(self):
+        selected_ranges = self.table_queue.selectedRanges()
+        if not selected_ranges:
+            QMessageBox.warning(self, "警告", "请先在列表中选中要重置状态的任务！")
+            return
+            
+        rows = []
+        for r in selected_ranges:
+            rows.extend(range(r.topRow(), r.bottomRow() + 1))
+            
+        for row in rows:
+            if row < 0 or row >= len(self.task_queue):
+                continue
+                
+            task = self.task_queue[row]
+            
+            if task["status"] == "Encoding" or task["status"] == "压制中 🚀":
+                continue
+                
+            task["status"] = "等待中"
+            self.table_queue.setItem(row, 2, self.create_table_item("等待中"))
+            
+    def delete_queue_item(self):
+        selected_ranges = self.table_queue.selectedRanges()
+        if not selected_ranges:
+            return
+            
+        rows = []
+        for r in selected_ranges:
+            rows.extend(range(r.topRow(), r.bottomRow() + 1))
+            
+        rows.sort(reverse=True) # Delete from bottom to top to preserve indices
+        
+        for row in rows:
+            if row < 0 or row >= len(self.task_queue):
+                continue
+                
+            task = self.task_queue[row]
+            if task["status"] == "Encoding" or task["status"] == "压制中 🚀":
+                QMessageBox.warning(self, "警告", f"第 {row + 1} 行任务正在压制中，无法删除！")
+                continue
+                
+            self.task_queue.pop(row)
+            self.table_queue.removeRow(row)
+            # Adjust current_task_idx if necessary when deleting items prior to current
+            if row < self.current_task_idx:
+                self.current_task_idx -= 1
+                
+    def show_queue_context_menu(self, pos):
+        menu = QMenu(self)
+        
+        action_update = QAction("🔄 保存修改到选中项", self)
+        action_update.triggered.connect(self.update_queue_item)
+        menu.addAction(action_update)
+        
+        action_reset = QAction("↺ 重置状态", self)
+        action_reset.triggered.connect(self.reset_queue_item)
+        menu.addAction(action_reset)
+        
+        menu.addSeparator()
+        
+        action_delete = QAction("❌ 删除任务", self)
+        action_delete.triggered.connect(self.delete_queue_item)
+        menu.addAction(action_delete)
+        
+        menu.exec_(self.table_queue.mapToGlobal(pos))
+            
+    def clear_queue(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            QMessageBox.warning(self, "警告", "正在压制中，无法清空队列！")
+            return
+            
+        self.task_queue.clear()
+        self.table_queue.setRowCount(0)
+        self.current_task_idx = 0
         
     def toggle_pause(self):
         if self.btn_pause.text() == "⏸ 暂停":
@@ -386,6 +695,10 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             if hasattr(self, 'preview_timer'): self.preview_timer.start(1000)
             
     def stop_encoding(self):
+        # Stop global queue progression
+        self.is_queue_running = False
+        self.btn_start_queue.setEnabled(True)
+        
         # 只要触发停止按钮，只管杀后台，后续的 UI 更新全部交给信号自然触发
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.stop()
@@ -478,6 +791,15 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                 self.lbl_preview.clear()
                 self.lbl_preview.setText("任务已取消\n(画面预览结束)")
             print("====== 压制已被用户中止！======")
+            
+            # Update Queue Status
+            if self.current_task_idx < len(self.task_queue):
+                self.task_queue[self.current_task_idx]["status"] = "Cancelled"
+                self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("已取消 🚫"))
+                
+            self.is_queue_running = False
+            self.btn_start_queue.setEnabled(True)
+
         else:
             # 正常顺利完成的 UI 逻辑
             self.lbl_status.setText("状态: 压制完成！ ✅")
@@ -486,6 +808,16 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                 self.lbl_preview.clear()
                 self.lbl_preview.setText("压制已完成\n(画面预览结束)")
             print("====== 压制彻底结束！======")
+            
+            # Update Queue Status
+            if self.current_task_idx < len(self.task_queue):
+                self.task_queue[self.current_task_idx]["status"] = "Completed"
+                self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("完成 ✅"))
+                
+            # Auto-start next task if in queue mode
+            if self.is_queue_running:
+                self.current_task_idx += 1
+                self.start_encoding_task(self.current_task_idx)
     
     def select_input_file(self):
         # 呼出 Windows 原生文件选择框，限制只能选常见视频格式

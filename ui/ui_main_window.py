@@ -15,10 +15,11 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QProgressBar, QPushButton, QSizePolicy, QSlider,
-    QSpacerItem, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
+    QFormLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMainWindow, QProgressBar, QPushButton,
+    QSizePolicy, QSlider, QSpacerItem, QTabWidget,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -276,6 +277,61 @@ class Ui_MainWindow(object):
 
         self.right_panel.addWidget(self.label_4)
 
+        self.table_queue = QTableWidget(self.centralwidget)
+        if (self.table_queue.columnCount() < 3):
+            self.table_queue.setColumnCount(3)
+        __qtablewidgetitem = QTableWidgetItem()
+        self.table_queue.setHorizontalHeaderItem(0, __qtablewidgetitem)
+        __qtablewidgetitem1 = QTableWidgetItem()
+        self.table_queue.setHorizontalHeaderItem(1, __qtablewidgetitem1)
+        __qtablewidgetitem2 = QTableWidgetItem()
+        self.table_queue.setHorizontalHeaderItem(2, __qtablewidgetitem2)
+        self.table_queue.setObjectName(u"table_queue")
+        self.table_queue.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_queue.setColumnCount(3)
+        self.table_queue.horizontalHeader().setStretchLastSection(True)
+
+        self.right_panel.addWidget(self.table_queue)
+
+        self.queue_btn_layout = QHBoxLayout()
+        self.queue_btn_layout.setObjectName(u"queue_btn_layout")
+        self.btn_add_queue = QPushButton(self.centralwidget)
+        self.btn_add_queue.setObjectName(u"btn_add_queue")
+
+        self.queue_btn_layout.addWidget(self.btn_add_queue)
+
+        self.btn_update_queue = QPushButton(self.centralwidget)
+        self.btn_update_queue.setObjectName(u"btn_update_queue")
+
+        self.queue_btn_layout.addWidget(self.btn_update_queue)
+
+        self.btn_reset_queue = QPushButton(self.centralwidget)
+        self.btn_reset_queue.setObjectName(u"btn_reset_queue")
+
+        self.queue_btn_layout.addWidget(self.btn_reset_queue)
+
+        self.btn_start_queue = QPushButton(self.centralwidget)
+        self.btn_start_queue.setObjectName(u"btn_start_queue")
+
+        self.queue_btn_layout.addWidget(self.btn_start_queue)
+
+        self.btn_clear_queue = QPushButton(self.centralwidget)
+        self.btn_clear_queue.setObjectName(u"btn_clear_queue")
+
+        self.queue_btn_layout.addWidget(self.btn_clear_queue)
+
+
+        self.right_panel.addLayout(self.queue_btn_layout)
+
+        self.verticalSpacer_queue = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+
+        self.right_panel.addItem(self.verticalSpacer_queue)
+
+        self.label_5 = QLabel(self.centralwidget)
+        self.label_5.setObjectName(u"label_5")
+
+        self.right_panel.addWidget(self.label_5)
+
         self.progress_bar = QProgressBar(self.centralwidget)
         self.progress_bar.setObjectName(u"progress_bar")
         self.progress_bar.setValue(0)
@@ -372,7 +428,19 @@ class Ui_MainWindow(object):
         self.lbl_preview.setStyleSheet(QCoreApplication.translate("MainWindow", u"background-color: #1e1e1e; color: #888888; border-radius: 8px; font-size: 16px;", None))
         self.lbl_preview.setText(QCoreApplication.translate("MainWindow", u"\u753b\u9762\u9884\u89c8\u533a\n"
 "(\u7b49\u5f85\u538b\u5236\u5f00\u59cb...)", None))
-        self.label_4.setText(QCoreApplication.translate("MainWindow", u"<b>\U0001f4ca \U0000533a\U000057df\U000056db\U0000ff1a\U00008fd0\U0000884c\U000072b6\U00006001</b>", None))
+        self.label_4.setText(QCoreApplication.translate("MainWindow", u"<b>\U0001f4cb \U0000533a\U000057df\U000056db\U0000ff1a\U00004efb\U000052a1\U0000961f\U00005217</b>", None))
+        ___qtablewidgetitem = self.table_queue.horizontalHeaderItem(0)
+        ___qtablewidgetitem.setText(QCoreApplication.translate("MainWindow", u"\u6e90\u89c6\u9891", None));
+        ___qtablewidgetitem1 = self.table_queue.horizontalHeaderItem(1)
+        ___qtablewidgetitem1.setText(QCoreApplication.translate("MainWindow", u"\u76ee\u6807\u683c\u5f0f", None));
+        ___qtablewidgetitem2 = self.table_queue.horizontalHeaderItem(2)
+        ___qtablewidgetitem2.setText(QCoreApplication.translate("MainWindow", u"\u72b6\u6001", None));
+        self.btn_add_queue.setText(QCoreApplication.translate("MainWindow", u"\u2795 \u6dfb\u81f3\u961f\u5217", None))
+        self.btn_update_queue.setText(QCoreApplication.translate("MainWindow", u"\U0001f504 \U00004fdd\U00005b58\U00004fee\U00006539", None))
+        self.btn_reset_queue.setText(QCoreApplication.translate("MainWindow", u"\u21ba \u91cd\u7f6e\u72b6\u6001", None))
+        self.btn_start_queue.setText(QCoreApplication.translate("MainWindow", u"\u25b6 \u5f00\u59cb\u961f\u5217", None))
+        self.btn_clear_queue.setText(QCoreApplication.translate("MainWindow", u"\U0001f5d1 \U00006e05\U00007a7a\U0000961f\U00005217", None))
+        self.label_5.setText(QCoreApplication.translate("MainWindow", u"<b>\U0001f4ca \U0000533a\U000057df\U00004e94\U0000ff1a\U00008fd0\U0000884c\U000072b6\U00006001</b>", None))
         self.lbl_status.setStyleSheet(QCoreApplication.translate("MainWindow", u"color: #666666;", None))
         self.lbl_status.setText(QCoreApplication.translate("MainWindow", u"\u72b6\u6001: \u95f2\u7f6e | \u901f\u5ea6: -- | \u5269\u4f59\u65f6\u95f4: -- |  \u5f53\u524d\u6587\u4ef6\u5927\u5c0f: --", None))
     # retranslateUi
