@@ -8,6 +8,10 @@ def build_ffmpeg_args(config):
     :param config: 包含所有 UI 状态的字典
     """
     args = []
+    
+    # 强制映射所有流（视频、所有音轨、字幕）
+    args.extend(["-map", "0"])
+
     v_enc = config["v_enc"]
     is_nvenc = "nvenc" in v_enc
     is_amf = "amf" in v_enc
@@ -81,6 +85,20 @@ def build_ffmpeg_args(config):
         ar = config["a_sample"]
         if ar != "保持源": 
             args.extend(["-ar", ar])
+
+    # --- 字幕部分 ---
+    # 默认直接 copy 字幕流，避免复杂内嵌
+    args.extend(["-c:s", "copy"])
+
+    # --- 自定义动态配置项部分 ---
+    extra_args_str = config.get("extra_args", "").strip()
+    if extra_args_str:
+        import shlex
+        try:
+            extra = shlex.split(extra_args_str)
+            args.extend(extra)
+        except Exception as e:
+            print(f"解析附加参数失败: {e}")
 
     return args
 

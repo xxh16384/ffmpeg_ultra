@@ -10,7 +10,9 @@ from core.worker import FFmpegWorker
 from core.engine import get_video_duration, probe_video_info,build_ffmpeg_args,check_single_encoder
 from ui.ui_main_window import Ui_MainWindow
 import ui.resources_rc
+import urllib.request
 from core.__version__ import __title__, __version__
+from PySide6.QtWidgets import QLineEdit, QFormLayout
 
 class FFmpegGUI(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -23,6 +25,24 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         
         self.setWindowIcon(QIcon(":/icons/icon.ico"))
         self.setAcceptDrops(True)
+
+        # 动态植入附加参数输入框
+        self.txt_extra_args = QLineEdit(self.tab_video)
+        self.txt_extra_args.setPlaceholderText("例如: -preset p4 -tune hq (可选)")
+        self.layout_video.insertRow(5, "附加/特性参数:", self.txt_extra_args)
+
+        # 动态植入重新探测按钮
+        from PySide6.QtWidgets import QPushButton
+        self.btn_reprobe = QPushButton("重新扫描显卡硬件 🔄", self.tab_video)
+        self.btn_reprobe.setToolTip("忽略本地缓存，强制重新点火测试当前环境物理显卡驱动的能力。")
+        self.btn_reprobe.clicked.connect(self.reprobe_hardware_encoders)
+        self.layout_video.insertRow(1, "", self.btn_reprobe)
+
+        # 动态植入预估大小标签
+        from PySide6.QtWidgets import QLabel
+        self.lbl_estimated_size = QLabel("预计生成大小: 未知 (未加载视频)")
+        self.lbl_estimated_size.setStyleSheet("color: #ffa500; font-weight: bold;")
+        self.layout_video.insertRow(7, "体积预估:", self.lbl_estimated_size)
 
         # ==========================================
         # 2. 保留原有的核心初始化逻辑：硬件自检与动态预设
@@ -79,6 +99,107 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         # 初始化：手动触发一次范围设定（默认 CQP）
         self.update_slider_range("cqp")
         self.toggle_custom_tab(list(self.preset_configs.keys())[0])
+
+        # === 绑定交互状态比对防呆逻辑 ===
+        self.connect_ui_change_signals()
+        self.check_queue_selection_state()
+
+    def connect_ui_change_signals(self):
+        self.cb_v_encoder.currentTextChanged.connect(self.check_queue_selection_state)
+        self.cb_v_fps.currentTextChanged.connect(self.check_queue_selection_state)
+        self.cb_v_res.currentTextChanged.connect(self.check_queue_selection_state)
+        self.cb_v_rc.currentTextChanged.connect(self.check_queue_selection_state)
+        self.sld_v_value.valueChanged.connect(self.check_queue_selection_state)
+        self.cb_a_encoder.currentTextChanged.connect(self.check_queue_selection_state)
+        self.cb_a_bitrate.currentTextChanged.connect(self.check_queue_selection_state)
+        self.cb_a_sample.currentTextChanged.connect(self.check_queue_selection_state)
+        self.txt_extra_args.textChanged.connect(self.check_queue_selection_state)
+        self.txt_input.textChanged.connect(self.check_queue_selection_state)
+        
+    def check_queue_selection_state(self, *args):
+        # 顺手更新一次预计大小
+        self.update_estimated_size()
+        
+        has_items = len(self.task_queue) > 0
+        self.btn_clear_queue.setEnabled(has_items)
+        self.btn_start_queue.setEnabled(has_items and not getattr(self, 'is_queue_running', False))
+        
+        selected_ranges = self.table_queue.selectedRanges()
+        if not selected_ranges:
+            self.btn_update_queue.setEnabled(False)
+            self.btn_reset_queue.setEnabled(False)
+            return
+            
+        self.btn_reset_queue.setEnabled(True)
+        
+        rows = []
+        for r in selected_ranges:
+            rows.extend(range(r.topRow(), r.bottomRow() + 1))
+            
+        if not rows:
+            self.btn_update_queue.setEnabled(False)
+            return
+            
+        first_row = rows[0]
+        if first_row < 0 or first_row >= len(self.task_queue):
+            return
+            
+        task = self.task_queue[first_row]
+        current_state = self.get_current_ui_state()
+        
+        is_modified = False
+        for k, v in current_state.items():
+            if str(task["ui_state"].get(k)) != str(v):
+                is_modified = True
+                break
+                
+        if len(rows) == 1:
+            if self.txt_input.text().strip() != task["input"]:
+                is_modified = True
+                
+        self.btn_update_queue.setEnabled(is_modified)
+
+    def update_estimated_size(self):
+        if hasattr(self, 'lbl_estimated_size'):
+            input_path = self.txt_input.text().strip()
+            if not input_path or not os.path.isfile(input_path):
+                self.lbl_estimated_size.setText("预计生成大小: 未知 (未加载视频)")
+                return
+                
+            if not hasattr(self, '_duration_cache'):
+                self._duration_cache = {}
+                
+            if input_path not in self._duration_cache:
+                try:
+                    from core.engine import get_video_duration
+                    self._duration_cache[input_path] = get_video_duration(input_path)
+                except:
+                    self._duration_cache[input_path] = 0
+                    
+            total_seconds = self._duration_cache[input_path]
+            if total_seconds <= 0:
+                self.lbl_estimated_size.setText("预计生成大小: 未知 (无法读取时长)")
+                return
+                
+            ui_state = self.get_current_ui_state()
+            rc = ui_state["rc"]
+            
+            audio_kbps = 0
+            if "copy" not in ui_state["a_enc"] and "剥离静音" not in ui_state["a_enc"]:
+                abit_str = ui_state["a_bit"].replace("k", "").strip()
+                if abit_str.isdigit():
+                    audio_kbps = int(abit_str)
+                    
+            video_kbps = 0
+            if rc in ["vbr", "cbr"]:
+                video_kbps = ui_state["vbr_cbr_val"]
+            else:
+                self.lbl_estimated_size.setText("预计生成大小: 未知 (CQP/CRF质量模式无法预估体积)")
+                return
+                
+            total_kbps = video_kbps + audio_kbps
+            size_mb = (total_kbps * 1000 / 8) * total_seconds / (1024 * 1024)
+            self.lbl_estimated_size.setText(f"预估生成大小: 约 {size_mb:.1f} MB (仅供参考)")
 
     def dragEnterEvent(self, event):
         """物理事件 1：当有文件被拖入窗口领空时触发"""
@@ -141,6 +262,31 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.sld_v_value.blockSignals(False)
         self.update_slider_label()    
         
+    def select_input_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择要压制的视频", "", "视频文件 (*.mp4 *.mkv *.avi *.mov *.flv);;所有文件 (*.*)"
+        )
+        if file_path:
+            self.txt_input.setText(file_path)
+            # 自动路径大脑：解析目录与文件名，生成默认输出路径
+            directory, filename = os.path.split(file_path)
+            name, ext = os.path.splitext(filename)
+            
+            target_ext = self.cb_format.currentText()
+            if not target_ext.startswith('.'):
+                target_ext = f".{target_ext}"
+                
+            output_path = os.path.join(directory, f"{name}_output{target_ext}")
+            self.txt_output.setText(output_path)
+
+    def select_output_file(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "保存压制后的视频", self.txt_output.text(), 
+            f"当前格式 (*{self.cb_format.currentText()});;所有文件 (*.*)"
+        )
+        if file_path:
+            self.txt_output.setText(file_path)
+
     def update_slider_label(self):
         """实时更新滑块旁边的文字显示"""
         mode = self.cb_v_rc.currentText()
@@ -158,17 +304,37 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
     def probe_hardware_encoders(self):
         """全能探针：无情地测试一大波编码器，看看系统里哪些是真正可用的硬件加速点火器"""
         print("正在进行全硬件引擎点火自检...")
+        
+        # ====== 新增：检查是否已有持久化结果以极速启动 ======
+        report_path = "hardware_report.txt"
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    match = re.search(r"可用编码器列表:\s*(\[.*?\])", content)
+                    if match:
+                        import ast
+                        cached_encoders = ast.literal_eval(match.group(1))
+                        # 确保 copy 在列表里（旧版可能没存 copy）
+                        if "copy" not in cached_encoders:
+                            cached_encoders.append("copy")
+                        print(f"🚀 [秒开] 已从 {report_path} 读取可用编码器: {cached_encoders}")
+                        return cached_encoders
+            except Exception as e:
+                print(f"⚠️ 解析缓存报告失败，回退到全面扫描: {e}")
+
         test_encoders = [
             "av1_nvenc", "hevc_nvenc", "h264_nvenc", # NVIDIA
             "av1_amf", "hevc_amf", "h264_amf",       # AMD
             "av1_qsv", "hevc_qsv", "h264_qsv",       # Intel
-            "libsvtav1", "libx265", "libx264"        # CPU
+            "libsvtav1", "libaom-av1", "librav1e",   # AV1 CPU 编队
+            "libx265", "libvpx-vp9", "libx264"       # 主流软压
         ]
         
         available = []
         
         # UI 逻辑：弹窗与进度条控制
-        progress = QProgressDialog("正在初始化硬件探针...", "跳过", 0, len(test_encoders), self)
+        progress = QProgressDialog("首次运行/缓存丢失，正在初始化硬件探针...\n此过程约需10秒，只需一次。", "跳过", 0, len(test_encoders), self)
         progress.resize(400, 100)
         progress.setWindowTitle("引擎自检")
         progress.setWindowModality(Qt.WindowModal)
@@ -196,12 +362,36 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         progress.setValue(len(test_encoders)) 
         
         # 写入报告
-        with open("hardware_report.txt", "w", encoding="utf-8") as f:
+        with open(report_path, "w", encoding="utf-8") as f:
             f.write(f"可用编码器列表: {available}\n")
             f.write(f"FFmpeg 路径: {get_ext_path('ffmpeg.exe')}\n")
             
         available.append("copy") 
         return available
+
+    def reprobe_hardware_encoders(self):
+        """完全重新探测硬件配置"""
+        report_path = "hardware_report.txt"
+        if os.path.exists(report_path):
+            try:
+                os.remove(report_path)
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"无法删除旧的点火缓存报告: {e}")
+                return
+                
+        # 直接调用探针，界面会挂起重新跑
+        self.available_v_encoders = self.probe_hardware_encoders()
+        
+        # 将重扫获得的数据重新装入原 UI 组件
+        current_enc = self.cb_v_encoder.currentText()
+        self.cb_v_encoder.blockSignals(True)
+        self.cb_v_encoder.clear()
+        self.cb_v_encoder.addItems(self.available_v_encoders)
+        if current_enc in self.available_v_encoders:
+            self.cb_v_encoder.setCurrentText(current_enc)
+        self.cb_v_encoder.blockSignals(False)
+        
+        QMessageBox.information(self, "硬件扫描完毕", "重新点火测试成功，支持列表已彻底刷新！")
     
     def load_dynamic_presets(self):
         self.preset_configs = {}
@@ -243,6 +433,18 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                 self.set_combo_tooltips(self.combo_preset, tips["preset_tips"])
             if "rc_tips" in tips:
                 self.set_combo_tooltips(self.cb_v_rc, tips["rc_tips"])
+            if "format_tips" in tips:
+                self.set_combo_tooltips(self.cb_format, tips["format_tips"])
+            if "fps_tips" in tips:
+                self.set_combo_tooltips(self.cb_v_fps, tips["fps_tips"])
+            if "res_tips" in tips:
+                self.set_combo_tooltips(self.cb_v_res, tips["res_tips"])
+            if "audio_enc_tips" in tips:
+                self.set_combo_tooltips(self.cb_a_encoder, tips["audio_enc_tips"])
+            if "audio_bit_tips" in tips:
+                self.set_combo_tooltips(self.cb_a_bitrate, tips["audio_bit_tips"])
+            if "audio_sample_tips" in tips:
+                self.set_combo_tooltips(self.cb_a_sample, tips["audio_sample_tips"])
 
     def toggle_custom_tab(self, text):
         try:
@@ -273,6 +475,9 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             self.cb_v_encoder.setCurrentText(cfg["v_enc"])
             self.cb_v_fps.setCurrentText(cfg["fps"])
             self.cb_v_res.setCurrentText(cfg["res"])
+
+            # 恢复附加参数
+            self.txt_extra_args.setText(cfg.get("extra_args", ""))
             
             #print("👉 正在拨动码率控制模式...")
             self.cb_v_rc.setCurrentText(cfg["rc"])
@@ -339,7 +544,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             "vbr_cbr_val": get_mapped_bitrate(self.sld_v_value.value()),
             "a_enc": self.cb_a_encoder.currentText(),
             "a_bit": self.cb_a_bitrate.currentText(),
-            "a_sample": self.cb_a_sample.currentText()
+            "a_sample": self.cb_a_sample.currentText(),
+            "extra_args": self.txt_extra_args.text().strip()
         }
     
     def start_encoding_task(self, idx):
@@ -377,41 +583,122 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.total_seconds = get_video_duration(input_path)
         
         self.enable_preview = self.chk_preview.isChecked()
-        self.preview_temp_dir = tempfile.gettempdir() 
-        self.preview_path = os.path.join(self.preview_temp_dir, "ffmpeg_preview_temp.jpg")
         
-        if os.path.exists(self.preview_path):
-            try: os.remove(self.preview_path)
-            except: pass
-
-        self.preview_timer = QTimer(self)
-        self.preview_timer.timeout.connect(self.update_preview)
+        # ====== 新增内存管道路由 ======
+        self.preview_port = 0 # Worker会随机分配
+        
         if self.enable_preview:
-            self.lbl_preview.setText("正在连接画面源...")
-            self.preview_timer.start(1000) 
+            # 开启TCP服务器线程接收MJPEG视频流
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(('127.0.0.1', 0))
+            sock.listen(1)
+            self.preview_port = sock.getsockname()[1]
+            self.preview_sock = sock
+            
+            # 启动独立线程专门接收Socket流
+            from PySide6.QtCore import QThread, Signal
+            class PreviewReceiver(QThread):
+                frame_received = Signal(bytes)
+                
+                def __init__(self, s):
+                    super().__init__()
+                    self.server_sock = s
+                    self.is_running = True
+                    
+                def run(self):
+                    self.server_sock.settimeout(2.0)
+                    try:
+                        conn, addr = self.server_sock.accept()
+                        conn.settimeout(1.0)
+                        
+                        buffer = bytearray()
+                        while self.is_running:
+                            try:
+                                data = conn.recv(16384)
+                                if not data:
+                                    break
+                                buffer.extend(data)
+                                
+                                # 持续解析 MJPEG 边界 (FF D8 ... FF D9)
+                                while True:
+                                    start_idx = buffer.find(b'\xff\xd8')
+                                    if start_idx == -1:
+                                        # 没头，清空无用前导数据
+                                        buffer.clear()
+                                        break
+                                        
+                                    end_idx = buffer.find(b'\xff\xd9', start_idx + 2)
+                                    if end_idx == -1:
+                                        # 不完整，等下一次接收
+                                        break
+                                        
+                                    # 提取出一帧完整图像
+                                    frame_data = buffer[start_idx:end_idx+2]
+                                    self.frame_received.emit(bytes(frame_data))
+                                    
+                                    # 丢弃已被提取的数据，保留剩余未处理的部分
+                                    buffer = buffer[end_idx+2:]
+                                    
+                            except socket.timeout:
+                                continue
+                            except Exception:
+                                break
+                                
+                        conn.close()
+                    except socket.timeout:
+                        pass # FFmpeg没连上
+                    except Exception as e:
+                        print(f"预览管道异常: {e}")
+                    finally:
+                        self.server_sock.close()
+                        
+                def stop(self):
+                    self.is_running = False
+                    try:
+                        # 尝试唤起阻塞的 accept
+                        dummy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        dummy.connect(('127.0.0.1', self.server_sock.getsockname()[1]))
+                        dummy.close()
+                    except: pass
+                    
+            self.preview_receiver = PreviewReceiver(sock)
+            self.preview_receiver.frame_received.connect(self.update_preview_frame)
+            self.lbl_preview.setText("正在建立本地TCP内存管道...")
+            self.preview_receiver.start()
             
         dynamic_args = build_ffmpeg_args(ui_config)
         
-        self.worker = FFmpegWorker(input_path, output_path, self.enable_preview, self.preview_path, dynamic_args)
+        self.worker = FFmpegWorker(input_file=input_path, output_file=output_path, enable_preview=self.enable_preview, preview_port=self.preview_port, encode_args=dynamic_args)
         self.worker.log_signal.connect(self.print_log)
+        self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.encoding_finished)
         self.worker.start()
 
+    def handle_worker_error(self, err_msg):
+        # 抛出弹窗，并更新状态
+        QMessageBox.critical(self, "压制失败", err_msg)
+        self.lbl_status.setText("状态: 压制失败 ❌")
+        
+        # 将队列状态标红
+        if self.current_task_idx < len(self.task_queue):
+            self.task_queue[self.current_task_idx]["status"] = "Error"
+            self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("错误 ❌"))
+            
+        self.encoding_finished()
+
     def start_encoding(self):
-        # If single task start is triggered
         input_path = self.txt_input.text().strip()
         output_path = self.txt_output.text().strip()
 
-        if not input_path or not output_path:
-            QMessageBox.warning(self, "警告", "请先选择需要压制的视频！")
-            return
+        # 如果输入框有独立的视频路径，直接添加入列（防止没加就点了开始报错）
+        if input_path and output_path and "批量" not in input_path:
+            self.add_to_queue()
+            # 加完后请空，防止第二次点击又重复加
+            self.txt_input.clear()
+            self.txt_output.clear()
             
-        # Push to queue and run it
-        self.add_to_queue()
-        # Find the last added task (assuming we just added one)
-        idx = len(self.task_queue) - 1
-        self.current_task_idx = idx
-        self.start_encoding_task(idx)
+        self.start_queue()
 
     def add_to_queue(self):
         input_path = self.txt_input.text().strip()
@@ -425,11 +712,19 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         
     def add_task_to_table(self, input_path, output_path, ui_state):
         from PySide6.QtWidgets import QTableWidgetItem
+        try:
+            # 打开一条只读把手从而触发系统锁定文件的防删保护
+            file_handle = open(input_path, 'rb')
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法锁定并加载源文件:\n{e}")
+            return
+            
         task = {
             "input": input_path,
             "output": output_path,
             "ui_state": ui_state,
-            "status": "等待中"
+            "status": "等待中",
+            "file_handle": file_handle # 持有句柄
         }
         self.task_queue.append(task)
         
@@ -442,6 +737,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.table_queue.setItem(row, 0, self.create_table_item(filename))
         self.table_queue.setItem(row, 1, self.create_table_item(f"{ui_state['v_enc']} {ext}"))
         self.table_queue.setItem(row, 2, self.create_table_item("等待中"))
+        
+        self.check_queue_selection_state()
         
     def create_table_item(self, text):
         from PySide6.QtWidgets import QTableWidgetItem
@@ -461,7 +758,10 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.btn_start_queue.setEnabled(False)
         self.btn_start.setEnabled(False)
         
-        # Find first pending task
+        self._run_next_pending_task()
+        
+    def _run_next_pending_task(self):
+        # Find first pending task from the very beginning
         found = False
         for i, t in enumerate(self.task_queue):
             if t["status"] == "等待中" or t["status"] == "Pending":
@@ -475,11 +775,13 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             self.is_queue_running = False
             self.btn_start_queue.setEnabled(True)
             self.btn_start.setEnabled(True)
-            QMessageBox.information(self, "提示", "队列中没有等待中的任务。")
+            self.lbl_status.setText("状态: 队列中所有任务均已处理完毕！")
+            QMessageBox.information(self, "提示", "所有排队的任务皆已处理完毕。")
             
     def load_queue_item_to_ui(self):
         selected_ranges = self.table_queue.selectedRanges()
         if not selected_ranges:
+            self.check_queue_selection_state()
             return
             
         rows = []
@@ -527,6 +829,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.cb_v_encoder.setCurrentText(cfg.get("v_enc", "copy"))
         self.cb_v_fps.setCurrentText(cfg.get("fps", "保持源"))
         self.cb_v_res.setCurrentText(cfg.get("res", "保持源"))
+        self.txt_extra_args.setText(cfg.get("extra_args", ""))
         
         self.cb_v_rc.setCurrentText(cfg.get("rc", "cqp"))
         self.cb_v_rc.blockSignals(False)
@@ -552,6 +855,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.cb_a_sample.blockSignals(False)
         
         self.update_slider_label()
+        
+        self.check_queue_selection_state()
 
     def update_queue_item(self):
         selected_ranges = self.table_queue.selectedRanges()
@@ -605,6 +910,8 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             QMessageBox.information(self, "成功", f"成功更新了 {updated_count} 个任务配置！")
         else:
             QMessageBox.warning(self, "跳过", "未更新任何任务 (可能选中的任务正在压制中)。")
+            
+        self.check_queue_selection_state()
         
     def reset_queue_item(self):
         selected_ranges = self.table_queue.selectedRanges()
@@ -628,6 +935,16 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             task["status"] = "等待中"
             self.table_queue.setItem(row, 2, self.create_table_item("等待中"))
             
+        self.check_queue_selection_state()
+            
+    def clear_task_handle(self, task):
+        # 关闭文件句柄以解除文件锁定
+        if "file_handle" in task and task["file_handle"]:
+            try:
+                task["file_handle"].close()
+                task["file_handle"] = None
+            except: pass
+
     def delete_queue_item(self):
         selected_ranges = self.table_queue.selectedRanges()
         if not selected_ranges:
@@ -648,11 +965,14 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                 QMessageBox.warning(self, "警告", f"第 {row + 1} 行任务正在压制中，无法删除！")
                 continue
                 
+            self.clear_task_handle(task)
             self.task_queue.pop(row)
             self.table_queue.removeRow(row)
             # Adjust current_task_idx if necessary when deleting items prior to current
             if row < self.current_task_idx:
                 self.current_task_idx -= 1
+                
+        self.check_queue_selection_state()
                 
     def show_queue_context_menu(self, pos):
         menu = QMenu(self)
@@ -678,21 +998,24 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "警告", "正在压制中，无法清空队列！")
             return
             
+        for task in self.task_queue:
+            self.clear_task_handle(task)
+            
         self.task_queue.clear()
         self.table_queue.setRowCount(0)
         self.current_task_idx = 0
+        
+        self.check_queue_selection_state()
         
     def toggle_pause(self):
         if self.btn_pause.text() == "⏸ 暂停":
             self.worker.pause()
             self.btn_pause.setText("▶ 恢复")
             self.lbl_status.setText("状态: 已暂停 (显卡已挂起)")
-            if hasattr(self, 'preview_timer'): self.preview_timer.stop()
         else:
             self.worker.resume()
             self.btn_pause.setText("⏸ 暂停")
             self.lbl_status.setText("状态: 正在狂飙压制中...")
-            if hasattr(self, 'preview_timer'): self.preview_timer.start(1000)
             
     def stop_encoding(self):
         # Stop global queue progression
@@ -705,59 +1028,45 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
 
     def print_log(self, text):
         #print(text) #调试时直接往控制台输出
-        # 1. 使用正则表达式狙击“当前时间”和“压制速度”
-        # 匹配格式如 time=01:14:58.85
-        time_match = re.search(r"time=(\d{2}:\d{2}:\d{2}\.\d{2})", text)
-        # 匹配格式如 speed=12.9x
-        speed_match = re.search(r"speed=\s*([\d\.]+)x", text)
-        storage_match = re.search(r"size=\s*([\d\.]+)KiB", text)
-
-        if time_match:
-            time_str = time_match.group(1)
+        # ====== 基于 -progress 的解析逻辑 ======
+        if text.startswith("out_time="):
+            time_str = text.split("=")[1].strip()
+            if time_str and time_str != "N/A":
+                # time_str 是 00:00:00.000000 的形式
+                try:
+                    h, m, s = time_str.split(':')
+                    current_seconds = int(h) * 3600 + int(m) * 60 + float(s)
+                    percent = int((current_seconds / self.total_seconds) * 100)
+                    percent = max(0, min(100, percent))
+                    self.progress_bar.setValue(percent)
+                    # 缓存给下面显示用
+                    self._last_time_str = time_str[:11] 
+                except: pass
+                
+        elif text.startswith("speed="):
+            speed_text = text.split("=")[1].strip()
+            # 从缓存里拿时间
+            t = getattr(self, '_last_time_str', '--')
+            s = getattr(self, '_last_size_str', '--')
+            self.lbl_status.setText(f"状态: 狂飙压制中... | 速度: {speed_text} | 当前进度: {t} | 当前文件大小：{s}")
             
-            # 2. 将 01:14:58.85 换算成纯秒数
-            h, m, s = time_str.split(':')
-            current_seconds = int(h) * 3600 + int(m) * 60 + float(s)
-
-            # 3 & 4. === 修改：使用探针读取到的真实时长来计算百分比 ===
-            percent = int((current_seconds / self.total_seconds) * 100)
-            
-            # 限制在 0-100 之间，防止浮点微小误差导致进度条溢出报错
-            percent = max(0, min(100, percent))
-            self.progress_bar.setValue(percent)
-            
-            # 格式化储存大小显示
-            if storage_match:
-                size_kib = float(storage_match.group(1))
-                if size_kib >= 1000 * 1000:
-                    storage_text = f"{size_kib / (1000 * 1000):.2f} GiB"
-                elif size_kib >= 1000:
-                    storage_text = f"{size_kib / 1000:.2f} MiB"
+        elif text.startswith("total_size="):
+            size_bytes_str = text.split("=")[1].strip()
+            if size_bytes_str and size_bytes_str.isdigit():
+                size_bytes = int(size_bytes_str)
+                if size_bytes >= 1024 * 1024 * 1024:
+                    storage_text = f"{size_bytes / (1024 * 1024 * 1024):.2f} GiB"
+                elif size_bytes >= 1024 * 1024:
+                    storage_text = f"{size_bytes / (1024 * 1024):.2f} MiB"
                 else:
-                    storage_text = f"{size_kib:.2f} KiB"
-
-            # 5. 更新状态栏面板
-            speed_text = speed_match.group(1) if speed_match else "--"
-            self.lbl_status.setText(f"状态: 狂飙压制中... | 速度: {speed_text}x | 当前进度: {time_str} | 当前文件大小：{storage_text}")
+                    storage_text = f"{size_bytes / 1024:.2f} KiB"
+                self._last_size_str = storage_text
+                
+        # 兼容 FFmpeg 一些普通的日志行直接显示在UI下方，比如一些警告。但不用太过频繁。
         
-    def update_preview(self):
-        if not os.path.exists(self.preview_path):
-            return
-
+    def update_preview_frame(self, data):
+        """直接接收子线程传来的 JPEG 二进制流，无需读写文件"""
         try:
-            # 1. 瞬间将硬盘文件的所有字节吸入 Python 内存
-            with open(self.preview_path, 'rb') as f:
-                data = f.read()
-            
-            # 2. 基础过滤：如果图片连 1KB 都没有，说明 FFmpeg 刚清空文件，直接跳过
-            if len(data) < 1024:
-                return
-
-            # 3. 严格校验内存数据：必须以 FF D8 开头 (SOF)，且以 FF D9 结尾 (EOF)
-            if not (data.startswith(b'\xff\xd8') and data.endswith(b'\xff\xd9')):
-                return
-
-            # 4. 核心魔法：切断硬盘联系！直接让 Qt 从刚才吸入的内存字节 (data) 里读取画面
             pixmap = QPixmap()
             if pixmap.loadFromData(data):
                 scaled_pixmap = pixmap.scaled(
@@ -766,9 +1075,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
                     Qt.SmoothTransformation
                 )
                 self.lbl_preview.setPixmap(scaled_pixmap)
-
         except Exception:
-            # 兜底：如果这 1 毫秒刚好碰到系统级的文件死锁，直接静默放过，等下一秒
             pass
 
     def encoding_finished(self):
@@ -779,23 +1086,28 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         self.btn_stop.setEnabled(False)
         self.btn_pause.setText("⏸ 暂停")
         
-        # 2. 停止可能还在刷新的监视器定时器
-        if hasattr(self, 'preview_timer') and self.preview_timer.isActive():
-            self.preview_timer.stop()
+        # 2. 停止接收线程
+        if hasattr(self, 'preview_receiver'):
+            self.preview_receiver.stop()
 
         # 3. 核心分流：判断到底是正常跑完，还是被中途干掉的？
         if getattr(self.worker, 'is_cancelled', False):
             # 被强行中止的 UI 逻辑
-            self.lbl_status.setText("状态: 压制已强制中止 🚫")
+            # 但是注意如果是因为 error 而调用过来的，上面可能已经设了状态
+            if "错误" not in self.lbl_status.text() and "失败" not in self.lbl_status.text():
+                self.lbl_status.setText("状态: 压制已强制中止 🚫")
+                
             if self.enable_preview:
                 self.lbl_preview.clear()
-                self.lbl_preview.setText("任务已取消\n(画面预览结束)")
-            print("====== 压制已被用户中止！======")
+                self.lbl_preview.setText("当前画面获取结束")
+            print("====== 压制已被用户或异常中止！======")
             
             # Update Queue Status
             if self.current_task_idx < len(self.task_queue):
-                self.task_queue[self.current_task_idx]["status"] = "Cancelled"
-                self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("已取消 🚫"))
+                # 只有在还没改状态时才改
+                if self.task_queue[self.current_task_idx]["status"] not in ["Error", "错误 ❌"]:
+                    self.task_queue[self.current_task_idx]["status"] = "Cancelled"
+                    self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("已取消 🚫"))
                 
             self.is_queue_running = False
             self.btn_start_queue.setEnabled(True)
@@ -813,11 +1125,11 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
             if self.current_task_idx < len(self.task_queue):
                 self.task_queue[self.current_task_idx]["status"] = "Completed"
                 self.table_queue.setItem(self.current_task_idx, 2, self.create_table_item("完成 ✅"))
+                self.clear_task_handle(self.task_queue[self.current_task_idx])
                 
             # Auto-start next task if in queue mode
             if self.is_queue_running:
-                self.current_task_idx += 1
-                self.start_encoding_task(self.current_task_idx)
+                self._run_next_pending_task()
     
     def select_input_file(self):
         # 呼出 Windows 原生文件选择框，限制只能选常见视频格式

@@ -4,14 +4,15 @@ from core.utils import get_ext_path
 
 class FFmpegWorker(QThread):
     log_signal = Signal(str)
+    error_signal = Signal(str)
     finished_signal = Signal()
 
-    def __init__(self, input_file, output_file, enable_preview, preview_path, encode_args): 
+    def __init__(self, input_file, output_file, enable_preview, preview_port, encode_args): 
         super().__init__()
         self.input_file = input_file
         self.output_file = output_file
         self.enable_preview = enable_preview  
-        self.preview_path = preview_path      
+        self.preview_port = preview_port      
         self.encode_args = encode_args 
         self.process = None 
         self.is_cancelled = False 
@@ -22,7 +23,16 @@ class FFmpegWorker(QThread):
         cmd.append(self.output_file)
 
         if self.enable_preview:
-            cmd.extend(["-vf", "fps=1", "-update", "1", self.preview_path])
+            # 采用 tcp 本地回环进行内存管道传输，mjpeg 格式，1 FPS
+            cmd.extend([
+                "-f", "image2pipe", 
+                "-vcodec", "mjpeg", 
+                "-r", "1", 
+                f"tcp://127.0.0.1:{self.preview_port}"
+            ])
+            
+        # ====== 新增：增加-progress获取规整进度======
+        cmd.extend(["-progress", "-", "-nostats"])
 
         try:
             CREATE_NO_WINDOW = 0x08000000
@@ -31,14 +41,23 @@ class FFmpegWorker(QThread):
                 text=True, encoding='utf-8', errors='ignore', creationflags=CREATE_NO_WINDOW
             )
 
+            error_lines = []
             for line in self.process.stdout:
-                self.log_signal.emit(line.strip())
+                line_str = line.strip()
+                self.log_signal.emit(line_str)
+                # 简单缓存最后10行用于报警
+                if len(error_lines) > 10:
+                    error_lines.pop(0)
+                error_lines.append(line_str)
 
+            self.process.stdout.close()
             self.process.wait()
-            if self.process.returncode != 0 and not self.is_cancelled:
-                self.log_signal.emit("❌ FFmpeg 发生致命错误，请检查参数或视频格式！")
-                return
             
+            if self.process.returncode != 0 and not self.is_cancelled:
+                err_summary = "\n".join(error_lines)
+                self.error_signal.emit(f"❌ FFmpeg 发生致命错误 (Exit {self.process.returncode})\n\n{err_summary}")
+                # 注意：发生错误时，不仅要 error，还要最终 emit finished 以清理状态
+                
             self.finished_signal.emit()
             
         except Exception as e:

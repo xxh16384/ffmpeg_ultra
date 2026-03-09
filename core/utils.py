@@ -102,6 +102,7 @@ def init_config_files():
       a_enc: "aac"
       a_bit: "128k"
       a_sample: "保持源"
+      extra_args: "-cpu-used 4"
 
   - name: "高画质收藏版 (HEVC/H.265, VBR)"
     requires: "hevc"
