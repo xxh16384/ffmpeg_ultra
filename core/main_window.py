@@ -343,8 +343,6 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         for i, enc in enumerate(test_encoders):
             progress.setLabelText(f"正在测试 {enc} 引擎...")
             progress.setValue(i)
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents() 
             if progress.wasCanceled(): break
 
             # ✨ 核心剥离点：UI 不再亲自调用子进程，而是呼叫底层的独立点火器！
