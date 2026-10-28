@@ -808,10 +808,7 @@ class FFmpegGUI(QMainWindow, Ui_MainWindow):
         
         # Restore format target box
         ext = os.path.splitext(task["output"])[1]
-        for i in range(self.cb_format.count()):
-            if self.cb_format.itemText(i) == ext:
-                self.cb_format.setCurrentIndex(i)
-                break
+        self.cb_format.setCurrentText(ext)
                 
         # Block signals temporarily to avoid redundant processing
         # Use custom tab trick to restore config since it mimics preset parsing
